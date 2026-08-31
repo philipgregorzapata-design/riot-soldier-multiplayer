@@ -47,7 +47,7 @@ const UPGRADE_COST_STEP = 10;
 
 const MAX_UPGRADE_LEVEL = 10;
 
-const MOVE_BASE_SPEED = 4.25;
+const MOVE_BASE_SPEED = 12;
 const MOVE_UPGRADE_SPEED = 0.25;
 
 const ASSAULTER_MIN_DAMAGE_MULTIPLIER = 0.25;
@@ -389,16 +389,16 @@ export class RiotRoom {
                 0,
 
               hp:
-                100,
+                0,
 
               maxHp:
                 100,
 
               class:
-                "assaulter",
+                null,
 
               alive:
-                true,
+                false,
 
               aux:
                 0,
@@ -671,16 +671,41 @@ export class RiotRoom {
     msg
   ) {
 
+    /*
+     * Class selection is the only action allowed before deployment.
+     * A player cannot move or shoot until a class is selected.
+     */
+    if (
+      !player.alive &&
+      typeof msg.class === "string"
+    ) {
+      const requested = msg.class.toLowerCase();
+
+      if (CLASSES[requested] && !player.class) {
+        player.class = requested;
+        player.alive = true;
+        player.hp = player.maxHp;
+        player.x = 120 + Math.random() * 900;
+        player.y = 100 + Math.random() * 500;
+        player.angle = 0;
+        player.lastShot = 0;
+        player.reloadUntil = 0;
+        player.shooting = false;
+        player.input = { w: false, a: false, s: false, d: false };
+
+        this.send(room.sockets.get(player.id), this.snapshot(room));
+      }
+      return;
+    }
+
     if (!player.alive)
       return;
-
 
     /*
      * Never trust the client's position.
      *
      * The server controls movement.
      */
-
 
     if (
       msg.input &&
@@ -2700,7 +2725,7 @@ export class RiotRoom {
               Date.now()
 
           })
-        ),
+        ],
 
       projectiles:
         room.projectiles.map(
