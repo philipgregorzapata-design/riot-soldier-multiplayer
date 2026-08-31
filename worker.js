@@ -47,7 +47,7 @@ const UPGRADE_COST_STEP = 10;
 
 const MAX_UPGRADE_LEVEL = 10;
 
-const MOVE_BASE_SPEED = 4.25;
+const MOVE_BASE_SPEED = 6.5;
 const MOVE_UPGRADE_SPEED = 0.25;
 
 const ASSAULTER_MIN_DAMAGE_MULTIPLIER = 0.25;
@@ -395,10 +395,10 @@ export class RiotRoom {
                 100,
 
               class:
-                "assaulter",
+                null,
 
               alive:
-                true,
+                false,
 
               aux:
                 0,
@@ -671,7 +671,31 @@ export class RiotRoom {
     msg
   ) {
 
-    if (!player.alive)
+    /*
+     * A player must choose a class before spawning.
+     * Class selection is accepted while unspawned.
+     */
+    if (typeof msg.class === "string") {
+      const requested = msg.class.toLowerCase();
+      if (CLASSES[requested]) {
+        const changed = player.class !== requested;
+        player.class = requested;
+        if (!player.alive && !player.respawnAt) {
+          const spawn = this.findSpawn(room);
+          player.x = spawn.x;
+          player.y = spawn.y;
+          player.hp = player.maxHp;
+          player.angle = 0;
+          player.alive = true;
+          player.shooting = false;
+          player.lastShot = 0;
+          player.reloadUntil = 0;
+        }
+        if (changed) player.reloadUntil = 0;
+      }
+    }
+
+    if (!player.alive || !player.class)
       return;
 
 
@@ -728,43 +752,7 @@ export class RiotRoom {
     }
 
 
-    /*
-     * Only allow known classes.
-     */
 
-    if (
-      typeof msg.class ===
-      "string"
-    ) {
-
-      const requested =
-        msg.class
-          .toLowerCase();
-
-      if (
-        CLASSES[
-          requested
-        ]
-      ) {
-
-        /*
-         * Switching class also cancels
-         * an RPG reload.
-         */
-
-        if (
-          player.class !==
-          requested
-        ) {
-
-          player.reloadUntil =
-            0;
-        }
-
-        player.class =
-          requested;
-      }
-    }
   }
 
 
