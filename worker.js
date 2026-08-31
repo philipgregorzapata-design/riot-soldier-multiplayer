@@ -2699,8 +2699,8 @@ export class RiotRoom {
               player.reloadUntil >
               Date.now()
 
-          }))
-        ],
+          })),
+        
 
       projectiles:
         room.projectiles.map(
