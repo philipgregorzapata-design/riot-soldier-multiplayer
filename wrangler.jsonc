@@ -1,6 +1,6 @@
 {
-  "name": "riot-game-server",
-  "main": "worker.js",
+  "name": "riot-soldier-multiplayer",
+  "main": "src/worker.js",
   "compatibility_date": "2026-08-31",
 
   "durable_objects": {
