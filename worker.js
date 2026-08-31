@@ -2697,7 +2697,7 @@ export class RiotRoom {
 
             reloading:
               player.reloadUntil >
-              Date.now()
+              Date.now(),
             shooting:
                 player.shooting
 
