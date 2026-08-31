@@ -528,10 +528,10 @@
    * world move naturally while staying inside the page border.
    */
   function worldViewport() {
-    const scale = Math.max(0.72, Math.min(1.15, Math.min(W / 1200, H / 800)));
+    const scale = Math.max(0.55, Math.min(1.0, Math.min(W / 1100, H / 700)));
     const me = myId ? players[myId] : null;
-    const camX = me ? Number(me.x || WORLD_WIDTH / 2) : WORLD_WIDTH / 2;
-    const camY = me ? Number(me.y || WORLD_HEIGHT / 2) : WORLD_HEIGHT / 2;
+    const camX = me && Number.isFinite(Number(me.x)) ? Number(me.x) : WORLD_WIDTH / 2;
+    const camY = me && Number.isFinite(Number(me.y)) ? Number(me.y) : WORLD_HEIGHT / 2;
 
     return {
       x: W / 2 - camX * scale,
@@ -810,7 +810,7 @@
         roomKeyInput.readOnly = true;
         setStatus(message.is_host ? "ONLINE HOST" : "ONLINE");
 
-        if (Array.isArray(message.map)) {
+        if (Array.isArray(message.map) && message.map.length) {
           worldMap = message.map;
         }
 
@@ -834,7 +834,7 @@
         const ids = new Set(incoming.map(p => String(p.id)));
 
         for (const id of Object.keys(players)) {
-          if (!ids.has(String(id))) delete players[id];
+          if (!ids.has(String(id)) && String(id) !== String(myId)) delete players[id];
         }
 
         incoming.forEach(updatePlayer);
@@ -850,7 +850,7 @@
           worldProjectiles = next;
         }
 
-        if (Array.isArray(message.map)) {
+        if (Array.isArray(message.map) && message.map.length) {
           worldMap = message.map;
         }
 
@@ -1011,6 +1011,23 @@
 
     selectedClass = className;
     classConfirmed = true;
+
+    // Immediately mirror the selection locally so the soldier is visible
+    // while the next authoritative server snapshot arrives.
+    if (!players[myId]) {
+      players[myId] = normalizePlayer({
+        id: myId, name: "YOU",
+        x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2,
+        angle: 0, hp: 100, maxHp: 100,
+        class: className, alive: true, aux: 0
+      });
+    } else {
+      players[myId].class = className;
+      players[myId].alive = true;
+      if (!Number.isFinite(players[myId].x)) players[myId].x = WORLD_WIDTH / 2;
+      if (!Number.isFinite(players[myId].y)) players[myId].y = WORLD_HEIGHT / 2;
+    }
+
     classEl.classList.remove("rs-selecting");
     updateHud();
 
@@ -1057,7 +1074,26 @@
     }
   }
 
+  function ensureFallbackMap() {
+    if (Array.isArray(worldMap) && worldMap.length) return;
+    // Visual fallback only. The server map, when available, always replaces this.
+    const seed = 73129;
+    let n = seed;
+    const rand = () => { n = (n * 1664525 + 1013904223) >>> 0; return n / 4294967296; };
+    worldMap = [];
+    for (let i = 0; i < 24; i++) {
+      const w = 140 + rand() * 260;
+      const h = 90 + rand() * 180;
+      worldMap.push({
+        x: 180 + rand() * (WORLD_WIDTH - w - 360),
+        y: 180 + rand() * (WORLD_HEIGHT - h - 360),
+        w, h, label: "AUX"
+      });
+    }
+  }
+
   function drawMap() {
+    ensureFallbackMap();
     const v = worldViewport();
 
     // The map fills the Riot page. Only the world boundary is clipped.
