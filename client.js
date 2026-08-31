@@ -1000,16 +1000,6 @@
       target.x - me.x
     );
 
-    // Assaulter is fully automatic while LMB is held.
-    // Keep the client muzzle/projectile effect in sync with the rapid fire.
-    if (mouseDown && selectedClass === "assaulter") {
-      const now = performance.now();
-      if (now - lastAssaultVisualShot >= 90) {
-        lastAssaultVisualShot = now;
-        spawnShotVisual("assaulter");
-      }
-    }
-
     try {
       ws.send(JSON.stringify({
         type: "input",
@@ -1179,9 +1169,9 @@
       visualProjectiles.push({
         x: origin.x + Math.cos(a) * 10,
         y: origin.y + Math.sin(a) * 10,
-        vx: Math.cos(a) * (className === "shotgun" ? 9 : 11),
-        vy: Math.sin(a) * (className === "shotgun" ? 9 : 11),
-        life: className === "sniper" ? 28 : 20,
+        vx: Math.cos(a) * (className === "shotgun" ? 4.5 : 5.5),
+        vy: Math.sin(a) * (className === "shotgun" ? 4.5 : 5.5),
+        life: className === "sniper" ? 75 : 34,
         radius: className === "shotgun" ? 2.2 : 2.8
       });
     }
@@ -1502,15 +1492,21 @@
 
   inputTimer = window.setInterval(() => {
     if (connected) sendInput();
-  }, 40);
+  }, 25);
 
   // Dedicated automatic-fire loop. Holding LMB keeps the server's
   // shooting flag alive even if the page throttles ordinary input updates.
   assaultTimer = window.setInterval(() => {
     if (connected && mouseDown && selectedClass === "assaulter") {
+      const now = performance.now();
+      if (now - lastAssaultVisualShot >= 90) {
+        lastAssaultVisualShot = now;
+        spawnShotVisual("assaulter");
+      }
+      // Keep the authoritative server shooting flag continuously alive.
       sendInput();
     }
-  }, 45);
+  }, 25);
 
   window.__riotSoldierCleanup = () => {
     destroyed = true;
