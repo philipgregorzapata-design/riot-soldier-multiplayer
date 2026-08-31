@@ -18,13 +18,14 @@
 
   // Client-side movement multiplier. The normal movement baseline is kept
   // intact, then increased by 50% as requested.
-  const MOVE_SPEED_MULTIPLIER = 1.5;
-  const BASE_MOVE_SPEED = 5;
-  const MOVE_SPEED = BASE_MOVE_SPEED * MOVE_SPEED_MULTIPLIER;
+  const MOVE_SPEED = 20;
+  const MOVE_SPEED_MULTIPLIER = 1;
+  const BASE_MOVE_SPEED = 20;
 
   // Visual-only projectile tuning. The server remains authoritative for hits.
   const BULLET_VISUAL_SPEED = 3.2;
-  const BULLET_VISUAL_LIFE = 90;
+  const BULLET_VISUAL_LIFE = 120;
+  const SNIPER_BULLET_VISUAL_LIFE = 300;
   const SHOTGUN_PELLETS = 8;
   const SHOTGUN_SPREAD = 0.38;
   const SHOTGUN_VISUAL_INTERVAL = 520;
@@ -1376,7 +1377,7 @@
         y: origin.y + Math.sin(a) * 10,
         vx: Math.cos(a) * speed,
         vy: Math.sin(a) * speed,
-        life: className === "sniper" ? BULLET_VISUAL_LIFE + 20 : BULLET_VISUAL_LIFE,
+        life: className === "sniper" ? SNIPER_BULLET_VISUAL_LIFE : BULLET_VISUAL_LIFE,
         radius: className === "shotgun" ? 2.5 : 2.8
       });
     }
