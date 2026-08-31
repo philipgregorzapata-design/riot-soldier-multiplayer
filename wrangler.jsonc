@@ -10,5 +10,21 @@
         "class_name": "RiotRoom"
       }
     ]
-  }
+  },
+
+  "exports": {
+    "RiotRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RiotRoom"
+      ]
+    }
+  ]
 }
