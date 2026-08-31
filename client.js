@@ -53,6 +53,37 @@
         cursor: crosshair;
       }
 
+      #rs-controls-help {
+        display: none;
+        position: fixed;
+        left: clamp(8px, 1.1vw, 16px);
+        bottom: clamp(82px, 9vh, 105px);
+        z-index: 25;
+        padding: clamp(5px, .55vw, 8px) clamp(7px, .7vw, 10px);
+        border-left: 1px solid rgba(255,255,255,.13);
+        color: rgba(255,255,255,.42);
+        font-size: clamp(6px, .55vw, 9px);
+        line-height: 1.55;
+        letter-spacing: .45px;
+        pointer-events: none;
+        text-shadow: 0 1px 2px rgba(0,0,0,.35);
+      }
+
+      #rs-controls-help .rs-help-title {
+        margin-bottom: 2px;
+        color: rgba(255,255,255,.58);
+        font-size: clamp(6px, .5vw, 8px);
+        font-weight: 900;
+        letter-spacing: 1px;
+      }
+
+      #rs-controls-help b {
+        display: inline-block;
+        min-width: 42px;
+        color: rgba(255,255,255,.68);
+        font-weight: 900;
+      }
+
       .rs-ui {
         box-sizing: border-box;
         color: rgba(255,255,255,.92);
@@ -313,35 +344,6 @@
         pointer-events: none;
       }
 
-      #rs-controls-help {
-        display: none;
-        position: fixed;
-        left: clamp(7px, 1vw, 14px);
-        bottom: clamp(118px, 14vh, 150px);
-        z-index: 21;
-        padding: 4px 7px;
-        border-left: 1px solid rgba(255,255,255,.12);
-        color: rgba(255,255,255,.42);
-        font-size: clamp(6px, .52vw, 8px);
-        line-height: 1.55;
-        letter-spacing: .35px;
-        pointer-events: none;
-        text-shadow: 0 1px 2px rgba(0,0,0,.35);
-      }
-      #rs-controls-help .rs-help-title {
-        color: rgba(255,255,255,.58);
-        font-size: clamp(6px, .48vw, 8px);
-        font-weight: 900;
-        letter-spacing: 1px;
-        margin-bottom: 2px;
-      }
-      #rs-controls-help b {
-        display: inline-block;
-        min-width: 38px;
-        color: rgba(255,255,255,.68);
-        font-weight: 900;
-      }
-
       #rs-respawn {
         display: none;
         position: fixed;
@@ -427,9 +429,11 @@
       <div><b>W A S D</b> MOVE</div>
       <div><b>LMB</b> SHOOT</div>
       <div><b>R</b> RELOAD</div>
-      <div><b>1-4</b> CLASS</div>
+      <div><b>1</b> ASSAULTER</div>
+      <div><b>2</b> SNIPER</div>
+      <div><b>3</b> RPG</div>
+      <div><b>4</b> SHOTGUN</div>
     </div>
-
     <div id="rs-aux-popup"></div>
     <div id="rs-respawn" class="rs-ui">RESPAWNING...</div>
   `;
@@ -443,6 +447,7 @@
   const joinButton = root.querySelector("#rs-join");
   const leaveButton = root.querySelector("#rs-leave");
   const statusEl = root.querySelector("#rs-status");
+  const controlsHelp = root.querySelector("#rs-controls-help");
 
   const roomEl = root.querySelector("#rs-room");
   const roomValueEl = root.querySelector("#rs-room-value");
@@ -459,7 +464,6 @@
   const classEl = root.querySelector("#rs-class");
   const auxPopupEl = root.querySelector("#rs-aux-popup");
   const respawnEl = root.querySelector("#rs-respawn");
-  const controlsHelp = root.querySelector("#rs-controls-help");
 
   let W = window.innerWidth;
   let H = window.innerHeight;
@@ -630,7 +634,8 @@
   function updateHud() {
     const me = players[myId];
 
-    const cls = selectedClass || me?.class || "assaulter";
+    const cls = me?.class || selectedClass;
+    selectedClass = cls;
 
     classLabelEl.textContent =
       CLASSES[cls]?.label || String(cls).toUpperCase();
@@ -647,7 +652,7 @@
       `MOVE<br>LV ${myMoveLevel}`;
 
     root.querySelectorAll(".rs-class-button").forEach(btn => {
-      btn.classList.toggle("active", !!selectedClass && btn.dataset.class === selectedClass);
+      btn.classList.toggle("active", btn.dataset.class === cls);
     });
   }
 
@@ -682,6 +687,7 @@
     playersEl.style.display = active ? "block" : "none";
     hudEl.style.display = active ? "block" : "none";
     classEl.style.display = active ? "block" : "none";
+    if (controlsHelp) controlsHelp.style.display = active ? "block" : "none";
     leaveButton.style.display = active ? "inline-block" : "none";
     joinButton.style.display = active ? "none" : "inline-block";
 
@@ -762,7 +768,6 @@
     myReloadLevel = 0;
     myFireLevel = 0;
     myMoveLevel = 0;
-    selectedClass = null;
 
     setStatus("CONNECTING...");
 
@@ -799,9 +804,13 @@
         roomKey = message.room || key;
 
         roomValueEl.textContent = roomKey;
-        roomKeyInput.value = roomKey;
+
+        // Once inside a room, the room key is a display only.
         roomKeyInput.readOnly = true;
-        roomKeyInput.setAttribute("aria-label", `Room ${roomKey}`);
+        roomKeyInput.value = roomKey;
+        roomKeyInput.setAttribute("aria-readonly", "true");
+        roomKeyInput.blur();
+
         setStatus(message.is_host ? "ONLINE HOST" : "ONLINE");
 
         if (Array.isArray(message.map)) {
@@ -848,7 +857,7 @@
           myReloadLevel = Number(me.reloadLevel || 0);
           myFireLevel = Number(me.fireLevel || 0);
           myMoveLevel = Number(me.moveLevel || 0);
-          if (!selectedClass && me.class) selectedClass = null;
+          selectedClass = me.class || selectedClass;
         }
 
         updatePlayerList();
@@ -942,9 +951,6 @@
     connected = false;
     myId = null;
     roomKey = null;
-    roomKeyInput.readOnly = false;
-    roomKeyInput.value = "";
-    roomKeyInput.removeAttribute("aria-label");
 
     clearPlayers();
 
@@ -983,7 +989,7 @@
         type: "input",
         input,
         angle,
-        class: selectedClass || me.class || "assaulter"
+        class: selectedClass
       }));
     } catch {
       setStatus("SEND FAILED");
@@ -1105,13 +1111,15 @@
     ctx.translate(p.x, p.y);
     ctx.rotate(Number(projectile.angle || 0));
 
-    // Neon-white projectile core + glow.
+    // Neon-white projectile glow.
     ctx.shadowColor = "rgba(255,255,255,.98)";
-    ctx.shadowBlur = Math.max(7, size * 3.5);
+    ctx.shadowBlur = Math.max(8, size * 3.8);
 
     if (projectile.type === "rpg") {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(-size * 1.8, -size * .45, size * 3.6, size * .9);
+
+      ctx.shadowBlur = Math.max(12, size * 5);
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(size * 1.2, -size * .35, size * .8, size * .7);
     } else {
@@ -1121,8 +1129,17 @@
       ctx.fill();
     }
 
-    ctx.shadowBlur = Math.max(2, size);
+    // Hot white core.
+    ctx.shadowBlur = 0;
     ctx.fillStyle = "#ffffff";
+    if (projectile.type === "rpg") {
+      ctx.fillRect(-size * 1.7, -size * .30, size * 3.4, size * .6);
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1, size * .52), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 
@@ -1229,6 +1246,11 @@
   }
 
   function onRoomKeyInput() {
+    if (roomKeyInput.readOnly && roomKey) {
+      roomKeyInput.value = roomKey;
+      return;
+    }
+
     // Do not block typing: every A-Z and 0-9 character is accepted.
     // Hyphens are also accepted.
     roomKeyInput.value = roomKeyInput.value
@@ -1263,17 +1285,25 @@
       return;
     }
 
-    if (key === "r") {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "reload" }));
-      }
+    const classKeys = {
+      "1": "assaulter",
+      "2": "sniper",
+      "3": "rpg",
+      "4": "shotgun"
+    };
+
+    if (classKeys[key]) {
+      chooseClass(classKeys[key]);
       event.preventDefault();
       return;
     }
 
-    const classByKey = { "1": "assaulter", "2": "sniper", "3": "rpg", "4": "shotgun" };
-    if (classByKey[key]) {
-      chooseClass(classByKey[key]);
+    if (key === "r") {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "reload" }));
+        } catch {}
+      }
       event.preventDefault();
     }
   }
@@ -1292,26 +1322,63 @@
     mouseY = event.clientY;
   }
 
-  function onMouseDown(event) {
-    if (!connected || !root.classList.contains("game-active")) return;
+  function isGameCanvasEvent(event) {
+    const target = event.target;
+    if (!target) return false;
 
-    // Do not turn HUD/class controls into shooting clicks.
-    if (event.target.closest("#rs-hud") ||
-        event.target.closest("#rs-class") ||
-        event.target.closest("#rs-controls")) {
-      return;
+    // HUD, class buttons, room controls and upgrade buttons must remain clickable.
+    if (target.closest?.("#rs-hud, #rs-class, #rs-controls")) {
+      return false;
     }
 
-    if (event.button === 0) {
-      mouseDown = true;
+    return true;
+  }
+
+  function beginShoot(event) {
+    if (!connected || event.button !== 0) return;
+    if (!isGameCanvasEvent(event)) return;
+
+    mouseX = event.clientX;
+    mouseY = event.clientY;
+    mouseDown = true;
+
+    // Capture the pointer so releasing/holding LMB remains reliable even
+    // when the cursor moves over another element or the underlying Riot page.
+    if (canvas?.setPointerCapture && event.pointerId != null) {
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch {}
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Send immediately instead of waiting for the 50 ms input timer.
+    sendInput();
+  }
+
+  function endShoot(event) {
+    if (event.button !== 0) return;
+
+    mouseDown = false;
+
+    if (canvas?.releasePointerCapture && event.pointerId != null) {
+      try {
+        if (canvas.hasPointerCapture?.(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+      } catch {}
+    }
+
+    if (connected) {
       event.preventDefault();
+      sendInput();
     }
   }
 
-  function onMouseUp(event) {
-    if (event.button === 0) {
-      mouseDown = false;
-    }
+  function onMouseMove(event) {
+    mouseX = event.clientX;
+    mouseY = event.clientY;
   }
 
   function onBlur() {
@@ -1346,27 +1413,23 @@
   document.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("keyup", onKeyUp, true);
   document.addEventListener("mousemove", onMouseMove, true);
-  document.addEventListener("mousedown", onMouseDown, true);
-  document.addEventListener("mouseup", onMouseUp, true);
 
-  // Canvas-level handlers make LMB shooting reliable even when the Riot page
-  // or another overlay also has mouse handlers.
-  canvas.addEventListener("mousedown", event => {
-    if (!connected || event.button !== 0) return;
-    mouseX = event.clientX;
-    mouseY = event.clientY;
-    mouseDown = true;
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  canvas.addEventListener("mouseup", event => {
-    if (event.button === 0) {
-      mouseDown = false;
+  // Pointer events are used for shooting because they are more reliable
+  // than a document-level mousedown when the game overlays another page.
+  window.addEventListener("pointermove", onMouseMove, true);
+  window.addEventListener("pointerdown", beginShoot, true);
+  window.addEventListener("pointerup", endShoot, true);
+  window.addEventListener("pointercancel", endShoot, true);
+
+  // Mouse fallback for browsers/extensions that interfere with PointerEvent.
+  window.addEventListener("mousedown", beginShoot, true);
+  window.addEventListener("mouseup", endShoot, true);
+
+  window.addEventListener("contextmenu", event => {
+    if (connected && isGameCanvasEvent(event)) {
       event.preventDefault();
-      event.stopPropagation();
     }
-  });
-  canvas.addEventListener("contextmenu", event => event.preventDefault());
+  }, true);
 
   /*
    * Because the root is pointer-events:none before joining, the small
@@ -1424,8 +1487,14 @@
     document.removeEventListener("keydown", onKeyDown, true);
     document.removeEventListener("keyup", onKeyUp, true);
     document.removeEventListener("mousemove", onMouseMove, true);
-    document.removeEventListener("mousedown", onMouseDown, true);
-    document.removeEventListener("mouseup", onMouseUp, true);
+
+    window.removeEventListener("pointermove", onMouseMove, true);
+    window.removeEventListener("pointerdown", beginShoot, true);
+    window.removeEventListener("pointerup", endShoot, true);
+    window.removeEventListener("pointercancel", endShoot, true);
+
+    window.removeEventListener("mousedown", beginShoot, true);
+    window.removeEventListener("mouseup", endShoot, true);
 
     closeSocket();
     root.remove();
