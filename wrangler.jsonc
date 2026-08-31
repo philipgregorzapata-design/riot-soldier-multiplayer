@@ -1,6 +1,6 @@
 {
   "name": "riot-soldier-multiplayer",
-  "main": "/worker.js",
+  "main": "worker.js",
   "compatibility_date": "2026-08-31",
 
   "durable_objects": {
