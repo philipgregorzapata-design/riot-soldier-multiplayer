@@ -482,6 +482,7 @@
   let mouseX = W / 2;
   let mouseY = H / 2;
   let mouseDown = false;
+  let lastAssaultVisualShot = 0;
 
   let selectedClass = null;
   let classConfirmed = false;
@@ -999,6 +1000,16 @@
       target.x - me.x
     );
 
+    // Assaulter is fully automatic while LMB is held.
+    // Keep the client muzzle/projectile effect in sync with the rapid fire.
+    if (mouseDown && selectedClass === "assaulter") {
+      const now = performance.now();
+      if (now - lastAssaultVisualShot >= 90) {
+        lastAssaultVisualShot = now;
+        spawnShotVisual("assaulter");
+      }
+    }
+
     try {
       ws.send(JSON.stringify({
         type: "input",
@@ -1168,9 +1179,9 @@
       visualProjectiles.push({
         x: origin.x + Math.cos(a) * 10,
         y: origin.y + Math.sin(a) * 10,
-        vx: Math.cos(a) * (className === "shotgun" ? 26 : 34),
-        vy: Math.sin(a) * (className === "shotgun" ? 26 : 34),
-        life: className === "sniper" ? 9 : 13,
+        vx: Math.cos(a) * (className === "shotgun" ? 9 : 11),
+        vy: Math.sin(a) * (className === "shotgun" ? 9 : 11),
+        life: className === "sniper" ? 28 : 20,
         radius: className === "shotgun" ? 2.2 : 2.8
       });
     }
@@ -1178,14 +1189,14 @@
 
   function createRpgExplosion(x, y) {
     const pos = worldToScreen(Number(x || 0), Number(y || 0));
-    const count = 18;
+    const count = 28;
     const particles = [];
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2;
-      const speed = 2.5 + Math.random() * 2.5;
-      particles.push({ x: pos.x, y: pos.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 24 + Math.random() * 10 });
+      const speed = 3.5 + Math.random() * 3.5;
+      particles.push({ x: pos.x, y: pos.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 30 + Math.random() * 12 });
     }
-    explosions.push({ x: pos.x, y: pos.y, radius: 3, maxRadius: 45, life: 28, particles });
+    explosions.push({ x: pos.x, y: pos.y, radius: 3, maxRadius: 60, life: 34, particles });
   }
 
   function updateVisualEffects() {
@@ -1226,7 +1237,7 @@
         if (b.life <= 0) continue;
         ctx.fillStyle = "#fff";
         ctx.beginPath();
-        ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2);
+        ctx.arc(b.x, b.y, 3.2, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.restore();
@@ -1398,7 +1409,10 @@
 
     if (event.button === 0) {
       mouseDown = true;
-      spawnShotVisual(selectedClass);
+      lastAssaultVisualShot = 0;
+      if (selectedClass !== "assaulter" && selectedClass !== "rpg") {
+        spawnShotVisual(selectedClass);
+      }
       sendInput();
       event.preventDefault();
     }
@@ -1488,13 +1502,22 @@
 
   inputTimer = window.setInterval(() => {
     if (connected) sendInput();
-  }, 50);
+  }, 40);
+
+  // Dedicated automatic-fire loop. Holding LMB keeps the server's
+  // shooting flag alive even if the page throttles ordinary input updates.
+  assaultTimer = window.setInterval(() => {
+    if (connected && mouseDown && selectedClass === "assaulter") {
+      sendInput();
+    }
+  }, 45);
 
   window.__riotSoldierCleanup = () => {
     destroyed = true;
 
     cancelAnimationFrame(animationId);
     clearInterval(inputTimer);
+    clearInterval(assaultTimer);
     clearTimeout(auxPopupTimer);
     clearTimeout(killNoteTimer);
 
