@@ -53,37 +53,6 @@
         cursor: crosshair;
       }
 
-      #rs-controls-help {
-        display: none;
-        position: fixed;
-        left: clamp(8px, 1.1vw, 16px);
-        bottom: clamp(82px, 9vh, 105px);
-        z-index: 25;
-        padding: clamp(5px, .55vw, 8px) clamp(7px, .7vw, 10px);
-        border-left: 1px solid rgba(255,255,255,.13);
-        color: rgba(255,255,255,.42);
-        font-size: clamp(6px, .55vw, 9px);
-        line-height: 1.55;
-        letter-spacing: .45px;
-        pointer-events: none;
-        text-shadow: 0 1px 2px rgba(0,0,0,.35);
-      }
-
-      #rs-controls-help .rs-help-title {
-        margin-bottom: 2px;
-        color: rgba(255,255,255,.58);
-        font-size: clamp(6px, .5vw, 8px);
-        font-weight: 900;
-        letter-spacing: 1px;
-      }
-
-      #rs-controls-help b {
-        display: inline-block;
-        min-width: 42px;
-        color: rgba(255,255,255,.68);
-        font-weight: 900;
-      }
-
       .rs-ui {
         box-sizing: border-box;
         color: rgba(255,255,255,.92);
@@ -424,16 +393,6 @@
       </div>
     </div>
 
-    <div id="rs-controls-help">
-      <div class="rs-help-title">CONTROLS</div>
-      <div><b>W A S D</b> MOVE</div>
-      <div><b>LMB</b> SHOOT</div>
-      <div><b>R</b> RELOAD</div>
-      <div><b>1</b> ASSAULTER</div>
-      <div><b>2</b> SNIPER</div>
-      <div><b>3</b> RPG</div>
-      <div><b>4</b> SHOTGUN</div>
-    </div>
     <div id="rs-aux-popup"></div>
     <div id="rs-respawn" class="rs-ui">RESPAWNING...</div>
   `;
@@ -447,7 +406,6 @@
   const joinButton = root.querySelector("#rs-join");
   const leaveButton = root.querySelector("#rs-leave");
   const statusEl = root.querySelector("#rs-status");
-  const controlsHelp = root.querySelector("#rs-controls-help");
 
   const roomEl = root.querySelector("#rs-room");
   const roomValueEl = root.querySelector("#rs-room-value");
@@ -476,6 +434,8 @@
 
   let worldMap = [];
   let worldProjectiles = [];
+  let visualProjectiles = [];
+  let explosions = [];
 
   const players = Object.create(null);
   const keys = Object.create(null);
@@ -484,7 +444,7 @@
   let mouseY = H / 2;
   let mouseDown = false;
 
-  let selectedClass = null;
+  let selectedClass = "assaulter";
   let myAux = 0;
   let myReloadLevel = 0;
   let myFireLevel = 0;
@@ -687,7 +647,6 @@
     playersEl.style.display = active ? "block" : "none";
     hudEl.style.display = active ? "block" : "none";
     classEl.style.display = active ? "block" : "none";
-    if (controlsHelp) controlsHelp.style.display = active ? "block" : "none";
     leaveButton.style.display = active ? "inline-block" : "none";
     joinButton.style.display = active ? "none" : "inline-block";
 
@@ -804,13 +763,6 @@
         roomKey = message.room || key;
 
         roomValueEl.textContent = roomKey;
-
-        // Once inside a room, the room key is a display only.
-        roomKeyInput.readOnly = true;
-        roomKeyInput.value = roomKey;
-        roomKeyInput.setAttribute("aria-readonly", "true");
-        roomKeyInput.blur();
-
         setStatus(message.is_host ? "ONLINE HOST" : "ONLINE");
 
         if (Array.isArray(message.map)) {
@@ -843,7 +795,14 @@
         incoming.forEach(updatePlayer);
 
         if (Array.isArray(message.projectiles)) {
-          worldProjectiles = message.projectiles;
+          const next = message.projectiles;
+          const nextIds = new Set(next.map(p => String(p.id)));
+          for (const old of worldProjectiles) {
+            if (old?.type === "rpg" && old?.id && !nextIds.has(String(old.id))) {
+              createRpgExplosion(old.x, old.y);
+            }
+          }
+          worldProjectiles = next;
         }
 
         if (Array.isArray(message.map)) {
@@ -1099,48 +1058,111 @@
 
   function drawProjectile(projectile) {
     const v = worldViewport();
-
-    const p = worldToScreen(
-      Number(projectile.x || 0),
-      Number(projectile.y || 0)
-    );
-
-    const size = Math.max(2.5, 7 * v.scale + 2);
+    const p = worldToScreen(Number(projectile.x || 0), Number(projectile.y || 0));
+    const size = Math.max(3, 5.5 * Math.max(v.scale * 2.2, 0.65));
 
     ctx.save();
     ctx.translate(p.x, p.y);
-    ctx.rotate(Number(projectile.angle || 0));
 
-    // Neon-white projectile glow.
-    ctx.shadowColor = "rgba(255,255,255,.98)";
-    ctx.shadowBlur = Math.max(8, size * 3.8);
-
-    if (projectile.type === "rpg") {
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(-size * 1.8, -size * .45, size * 3.6, size * .9);
-
-      ctx.shadowBlur = Math.max(12, size * 5);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(size * 1.2, -size * .35, size * .8, size * .7);
-    } else {
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(0, 0, size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Hot white core.
-    ctx.shadowBlur = 0;
+    // Every projectile is a fast, round projectile. RPG is a larger shell.
+    const r = projectile.type === "rpg" ? size * 1.65 : size;
+    ctx.shadowBlur = projectile.type === "rpg" ? 16 : 10;
+    ctx.shadowColor = "rgba(255,255,255,.95)";
     ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+
     if (projectile.type === "rpg") {
-      ctx.fillRect(-size * 1.7, -size * .30, size * 3.4, size * .6);
-    } else {
+      ctx.shadowBlur = 5;
+      ctx.fillStyle = "#fff6c9";
       ctx.beginPath();
-      ctx.arc(0, 0, Math.max(1, size * .52), 0, Math.PI * 2);
+      ctx.arc(0, 0, r * .55, 0, Math.PI * 2);
       ctx.fill();
     }
-
     ctx.restore();
+  }
+
+  function spawnShotVisual(className) {
+    if (!connected || !myId) return;
+    const me = players[myId];
+    if (!me) return;
+    const origin = worldToScreen(me.x, me.y);
+    const target = { x: mouseX, y: mouseY };
+    const dx = target.x - origin.x;
+    const dy = target.y - origin.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const count = className === "shotgun" ? 8 : 1;
+    const spread = className === "shotgun" ? 0.22 : 0;
+    for (let i = 0; i < count; i++) {
+      const a = Math.atan2(uy, ux) + (count === 1 ? 0 : (i / (count - 1) - .5) * spread);
+      visualProjectiles.push({
+        x: origin.x + Math.cos(a) * 10,
+        y: origin.y + Math.sin(a) * 10,
+        vx: Math.cos(a) * (className === "shotgun" ? 26 : 34),
+        vy: Math.sin(a) * (className === "shotgun" ? 26 : 34),
+        life: className === "sniper" ? 9 : 13,
+        radius: className === "shotgun" ? 2.2 : 2.8
+      });
+    }
+  }
+
+  function createRpgExplosion(x, y) {
+    const pos = worldToScreen(Number(x || 0), Number(y || 0));
+    const count = 18;
+    const particles = [];
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const speed = 2.5 + Math.random() * 2.5;
+      particles.push({ x: pos.x, y: pos.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 24 + Math.random() * 10 });
+    }
+    explosions.push({ x: pos.x, y: pos.y, radius: 3, maxRadius: 45, life: 28, particles });
+  }
+
+  function updateVisualEffects() {
+    for (const b of visualProjectiles) { b.x += b.vx; b.y += b.vy; b.life--; }
+    visualProjectiles = visualProjectiles.filter(b => b.life > 0);
+
+    for (const e of explosions) {
+      e.radius += (e.maxRadius - e.radius) * .18;
+      e.life--;
+      for (const b of e.particles) { b.x += b.vx; b.y += b.vy; b.vx *= .94; b.vy *= .94; b.life--; }
+    }
+    explosions = explosions.filter(e => e.life > 0);
+  }
+
+  function drawVisualEffects() {
+    for (const b of visualProjectiles) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, b.life / 13);
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = "rgba(255,255,255,.95)";
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    for (const e of explosions) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, e.life / 14);
+      ctx.strokeStyle = "rgba(255,255,255,.9)";
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = "rgba(255,255,255,.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      for (const b of e.particles) {
+        if (b.life <= 0) continue;
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 
   function drawPlayer(p, index) {
@@ -1233,11 +1255,13 @@
 
     if (connected) {
       updatePlayers();
+      updateVisualEffects();
       drawMap();
 
       for (const projectile of worldProjectiles) {
         drawProjectile(projectile);
       }
+      drawVisualEffects();
 
       Object.values(players).forEach(drawPlayer);
     }
@@ -1246,11 +1270,6 @@
   }
 
   function onRoomKeyInput() {
-    if (roomKeyInput.readOnly && roomKey) {
-      roomKeyInput.value = roomKey;
-      return;
-    }
-
     // Do not block typing: every A-Z and 0-9 character is accepted.
     // Hyphens are also accepted.
     roomKeyInput.value = roomKeyInput.value
@@ -1282,29 +1301,6 @@
     if (["w", "a", "s", "d"].includes(key)) {
       keys[key] = true;
       event.preventDefault();
-      return;
-    }
-
-    const classKeys = {
-      "1": "assaulter",
-      "2": "sniper",
-      "3": "rpg",
-      "4": "shotgun"
-    };
-
-    if (classKeys[key]) {
-      chooseClass(classKeys[key]);
-      event.preventDefault();
-      return;
-    }
-
-    if (key === "r") {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(JSON.stringify({ type: "reload" }));
-        } catch {}
-      }
-      event.preventDefault();
     }
   }
 
@@ -1322,63 +1318,28 @@
     mouseY = event.clientY;
   }
 
-  function isGameCanvasEvent(event) {
-    const target = event.target;
-    if (!target) return false;
+  function onMouseDown(event) {
+    if (!connected) return;
 
-    // HUD, class buttons, room controls and upgrade buttons must remain clickable.
-    if (target.closest?.("#rs-hud, #rs-class, #rs-controls")) {
-      return false;
+    // Do not turn HUD/class controls into shooting clicks.
+    if (event.target.closest("#rs-hud") ||
+        event.target.closest("#rs-class") ||
+        event.target.closest("#rs-controls")) {
+      return;
     }
 
-    return true;
-  }
-
-  function beginShoot(event) {
-    if (!connected || event.button !== 0) return;
-    if (!isGameCanvasEvent(event)) return;
-
-    mouseX = event.clientX;
-    mouseY = event.clientY;
-    mouseDown = true;
-
-    // Capture the pointer so releasing/holding LMB remains reliable even
-    // when the cursor moves over another element or the underlying Riot page.
-    if (canvas?.setPointerCapture && event.pointerId != null) {
-      try {
-        canvas.setPointerCapture(event.pointerId);
-      } catch {}
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    // Send immediately instead of waiting for the 50 ms input timer.
-    sendInput();
-  }
-
-  function endShoot(event) {
-    if (event.button !== 0) return;
-
-    mouseDown = false;
-
-    if (canvas?.releasePointerCapture && event.pointerId != null) {
-      try {
-        if (canvas.hasPointerCapture?.(event.pointerId)) {
-          canvas.releasePointerCapture(event.pointerId);
-        }
-      } catch {}
-    }
-
-    if (connected) {
-      event.preventDefault();
+    if (event.button === 0) {
+      mouseDown = true;
+      spawnShotVisual(selectedClass);
       sendInput();
+      event.preventDefault();
     }
   }
 
-  function onMouseMove(event) {
-    mouseX = event.clientX;
-    mouseY = event.clientY;
+  function onMouseUp(event) {
+    if (event.button === 0) {
+      mouseDown = false;
+    }
   }
 
   function onBlur() {
@@ -1412,24 +1373,9 @@
   // Capture only after the game is active.
   document.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("keyup", onKeyUp, true);
-  document.addEventListener("mousemove", onMouseMove, true);
-
-  // Pointer events are used for shooting because they are more reliable
-  // than a document-level mousedown when the game overlays another page.
-  window.addEventListener("pointermove", onMouseMove, true);
-  window.addEventListener("pointerdown", beginShoot, true);
-  window.addEventListener("pointerup", endShoot, true);
-  window.addEventListener("pointercancel", endShoot, true);
-
-  // Mouse fallback for browsers/extensions that interfere with PointerEvent.
-  window.addEventListener("mousedown", beginShoot, true);
-  window.addEventListener("mouseup", endShoot, true);
-
-  window.addEventListener("contextmenu", event => {
-    if (connected && isGameCanvasEvent(event)) {
-      event.preventDefault();
-    }
-  }, true);
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mousedown", onMouseDown, true);
+  document.addEventListener("mouseup", onMouseUp, true);
 
   /*
    * Because the root is pointer-events:none before joining, the small
@@ -1486,15 +1432,9 @@
 
     document.removeEventListener("keydown", onKeyDown, true);
     document.removeEventListener("keyup", onKeyUp, true);
-    document.removeEventListener("mousemove", onMouseMove, true);
-
-    window.removeEventListener("pointermove", onMouseMove, true);
-    window.removeEventListener("pointerdown", beginShoot, true);
-    window.removeEventListener("pointerup", endShoot, true);
-    window.removeEventListener("pointercancel", endShoot, true);
-
-    window.removeEventListener("mousedown", beginShoot, true);
-    window.removeEventListener("mouseup", endShoot, true);
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mousedown", onMouseDown, true);
+    document.removeEventListener("mouseup", onMouseUp, true);
 
     closeSocket();
     root.remove();
