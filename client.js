@@ -82,7 +82,7 @@
       }
 
       #rs-room-key {
-        width: 142px;
+        width: clamp(150px, 12vw, 220px);
         height: 29px;
         padding: 0 9px;
         border-radius: 6px;
@@ -95,6 +95,15 @@
         font-size: 11px;
         font-weight: 700;
         pointer-events: auto;
+        box-sizing: border-box;
+      }
+
+      #rs-room-key:disabled {
+        opacity: .82;
+        cursor: default;
+        color: rgba(255,255,255,.82);
+        text-align: center;
+        background: rgba(12,14,21,.55);
       }
 
       #rs-room-key::placeholder {
@@ -258,42 +267,69 @@
       #rs-class {
         display: none;
         position: fixed;
-        left: 14px;
-        bottom: 83px;
-        z-index: 20;
+        inset: 0;
+        z-index: 100;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        background: rgba(0,0,0,.10);
+      }
+
+      #rs-class.rs-selecting {
+        display: flex;
         pointer-events: auto;
       }
 
+      #rs-class-card {
+        width: min(560px, 78vw);
+        padding: clamp(22px, 4vw, 42px);
+        border-radius: 14px;
+        text-align: center;
+        background: rgba(18,20,29,.80);
+        border: 1px solid rgba(255,255,255,.14);
+        box-shadow: 0 18px 70px rgba(0,0,0,.30);
+        backdrop-filter: blur(12px);
+      }
+
       #rs-class-title {
-        margin-bottom: 4px;
-        color: rgba(255,255,255,.58);
-        font-size: 7px;
+        margin-bottom: 8px;
+        color: rgba(255,255,255,.92);
+        font-size: clamp(14px, 2vw, 24px);
         font-weight: 900;
-        letter-spacing: 1.1px;
+        letter-spacing: 2px;
+      }
+
+      #rs-class-subtitle {
+        margin-bottom: clamp(14px, 2vw, 24px);
+        color: rgba(255,255,255,.48);
+        font-size: clamp(8px, .8vw, 11px);
+        letter-spacing: 1px;
       }
 
       #rs-class-buttons {
-        display: flex;
-        gap: 4px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0,1fr));
+        gap: clamp(8px, 1.2vw, 14px);
       }
 
       .rs-class-button {
-        padding: 6px 7px;
-        border-radius: 5px;
-        border: 1px solid rgba(255,255,255,.09);
-        background: rgba(18,20,29,.72);
-        color: rgba(255,255,255,.68);
-        font-size: 7px;
+        min-height: clamp(64px, 8vw, 100px);
+        padding: 10px;
+        border-radius: 9px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(18,20,29,.74);
+        color: rgba(255,255,255,.78);
+        font-size: clamp(9px, 1vw, 13px);
         font-weight: 900;
-        letter-spacing: .4px;
+        letter-spacing: 1px;
         cursor: pointer;
       }
 
-      .rs-class-button:hover,
-      .rs-class-button.active {
+      .rs-class-button:hover {
         color: #fff;
-        border-color: rgba(227,72,92,.65);
+        border-color: rgba(227,72,92,.70);
         background: rgba(227,72,92,.28);
+        transform: translateY(-1px);
       }
 
       #rs-aux-popup {
@@ -384,12 +420,15 @@
     </div>
 
     <div id="rs-class">
-      <div id="rs-class-title">CLASS</div>
-      <div id="rs-class-buttons">
+      <div id="rs-class-card">
+        <div id="rs-class-title">SELECT YOUR CLASS</div>
+        <div id="rs-class-subtitle">CLICK A CLASS TO DEPLOY</div>
+        <div id="rs-class-buttons">
         <button class="rs-class-button active" data-class="assaulter">ASSAULT</button>
         <button class="rs-class-button" data-class="sniper">SNIPER</button>
         <button class="rs-class-button" data-class="rpg">RPG</button>
         <button class="rs-class-button" data-class="shotgun">SHOTGUN</button>
+        </div>
       </div>
     </div>
 
@@ -444,7 +483,8 @@
   let mouseY = H / 2;
   let mouseDown = false;
 
-  let selectedClass = "assaulter";
+  let selectedClass = null;
+  let classConfirmed = false;
   let myAux = 0;
   let myReloadLevel = 0;
   let myFireLevel = 0;
@@ -484,11 +524,11 @@
    * There is deliberately NO camera and NO scrolling.
    */
   function worldViewport() {
-    const marginX = Math.min(28, W * 0.02);
-    const marginY = Math.min(70, H * 0.07);
+    const marginX = 0;
+    const marginY = 0;
 
-    const availableW = Math.max(100, W - marginX * 2);
-    const availableH = Math.max(100, H - marginY * 2);
+    const availableW = Math.max(100, W);
+    const availableH = Math.max(100, H);
 
     const scale = Math.min(
       availableW / WORLD_WIDTH,
@@ -535,7 +575,7 @@
       targetAngle: Number.isFinite(data.angle) ? data.angle : 0,
       hp: Number.isFinite(data.hp) ? data.hp : 100,
       maxHp: Number.isFinite(data.maxHp) ? data.maxHp : 100,
-      class: data.class || "assaulter",
+      class: data.class || null,
       alive: data.alive !== false,
       aux: Number.isFinite(data.aux) ? data.aux : 0,
       reloadLevel: Number(data.reloadLevel || 0),
@@ -595,10 +635,9 @@
     const me = players[myId];
 
     const cls = me?.class || selectedClass;
-    selectedClass = cls;
 
     classLabelEl.textContent =
-      CLASSES[cls]?.label || String(cls).toUpperCase();
+      CLASSES[cls]?.label || "NO CLASS";
 
     auxEl.textContent = `AUX ${myAux}`;
 
@@ -612,7 +651,7 @@
       `MOVE<br>LV ${myMoveLevel}`;
 
     root.querySelectorAll(".rs-class-button").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.class === cls);
+      btn.classList.toggle("active", false);
     });
   }
 
@@ -646,9 +685,15 @@
     roomEl.style.display = active ? "block" : "none";
     playersEl.style.display = active ? "block" : "none";
     hudEl.style.display = active ? "block" : "none";
-    classEl.style.display = active ? "block" : "none";
+    classEl.classList.toggle("rs-selecting", active && !classConfirmed);
     leaveButton.style.display = active ? "inline-block" : "none";
     joinButton.style.display = active ? "none" : "inline-block";
+    roomKeyInput.disabled = active;
+    if (!active) {
+      roomKeyInput.disabled = false;
+      roomKeyInput.readOnly = false;
+      roomKeyInput.value = "";
+    }
 
     // Before joining, the game layer cannot intercept the Riot dashboard.
     // After joining, the transparent overlay captures mouse interaction.
@@ -723,6 +768,8 @@
     connected = false;
     myId = null;
     roomKey = null;
+    selectedClass = null;
+    classConfirmed = false;
     myAux = 0;
     myReloadLevel = 0;
     myFireLevel = 0;
@@ -763,6 +810,9 @@
         roomKey = message.room || key;
 
         roomValueEl.textContent = roomKey;
+        roomKeyInput.value = roomKey;
+        roomKeyInput.disabled = true;
+        roomKeyInput.readOnly = true;
         setStatus(message.is_host ? "ONLINE HOST" : "ONLINE");
 
         if (Array.isArray(message.map)) {
@@ -893,6 +943,8 @@
       connected = false;
       myId = null;
       roomKey = null;
+      selectedClass = null;
+      classConfirmed = false;
       mouseDown = false;
 
       clearPlayers();
@@ -910,6 +962,10 @@
     connected = false;
     myId = null;
     roomKey = null;
+    selectedClass = null;
+    classConfirmed = false;
+    roomKeyInput.disabled = false;
+    roomKeyInput.readOnly = false;
 
     clearPlayers();
 
@@ -926,7 +982,7 @@
     ) return;
 
     const me = players[myId];
-    if (!me) return;
+    if (!me || !classConfirmed || !selectedClass) return;
 
     const input = {
       w: !!keys.w,
@@ -956,10 +1012,22 @@
   }
 
   function chooseClass(className) {
-    if (!CLASSES[className] || !connected) return;
+    if (!CLASSES[className] || !connected || !ws || ws.readyState !== WebSocket.OPEN) return;
 
     selectedClass = className;
+    classConfirmed = true;
+    classEl.classList.remove("rs-selecting");
     updateHud();
+
+    try {
+      ws.send(JSON.stringify({
+        type: "input",
+        input: { w:false, a:false, s:false, d:false, shooting:false },
+        angle: 0,
+        class: className
+      }));
+    } catch {}
+
     sendInput();
   }
 
@@ -1394,10 +1462,13 @@
     roomEl.style.display = active ? "block" : "none";
     playersEl.style.display = active ? "block" : "none";
     hudEl.style.display = active ? "block" : "none";
-    classEl.style.display = active ? "block" : "none";
+    classEl.classList.toggle("rs-selecting", active && !classConfirmed);
 
     leaveButton.style.display = active ? "inline-block" : "none";
     joinButton.style.display = active ? "none" : "inline-block";
+
+    roomKeyInput.disabled = active;
+    roomKeyInput.readOnly = active;
 
     if (active) {
       root.style.pointerEvents = "auto";
