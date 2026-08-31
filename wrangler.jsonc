@@ -12,7 +12,7 @@
   },
   "exports": {
     "RiotRoom": {
-      "type": "durable_object",
+      "type": "durable-object",
       "storage": "sqlite"
     }
   }
