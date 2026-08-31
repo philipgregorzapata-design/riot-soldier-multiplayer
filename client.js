@@ -521,29 +521,23 @@
   }
 
   /*
-   * Fit the complete server world into the visible browser area.
-   * There is deliberately NO camera and NO scrolling.
+   * The Riot page is the visible game viewport.
+   * The 5000x5000 server world is larger than the browser, so the camera
+   * follows the local player instead of shrinking the entire map into a
+   * tiny square. This keeps the map and soldiers visible and lets the
+   * world move naturally while staying inside the page border.
    */
   function worldViewport() {
-    const marginX = 0;
-    const marginY = 0;
-
-    const availableW = Math.max(100, W);
-    const availableH = Math.max(100, H);
-
-    const scale = Math.min(
-      availableW / WORLD_WIDTH,
-      availableH / WORLD_HEIGHT
-    );
-
-    const mapW = WORLD_WIDTH * scale;
-    const mapH = WORLD_HEIGHT * scale;
+    const scale = Math.max(0.72, Math.min(1.15, Math.min(W / 1200, H / 800)));
+    const me = myId ? players[myId] : null;
+    const camX = me ? Number(me.x || WORLD_WIDTH / 2) : WORLD_WIDTH / 2;
+    const camY = me ? Number(me.y || WORLD_HEIGHT / 2) : WORLD_HEIGHT / 2;
 
     return {
-      x: (W - mapW) / 2,
-      y: (H - mapH) / 2,
-      w: mapW,
-      h: mapH,
+      x: W / 2 - camX * scale,
+      y: H / 2 - camY * scale,
+      w: WORLD_WIDTH * scale,
+      h: WORLD_HEIGHT * scale,
       scale
     };
   }
@@ -1066,12 +1060,15 @@
   function drawMap() {
     const v = worldViewport();
 
-    // Very subtle map framing only. No opaque game background is added.
+    // The map fills the Riot page. Only the world boundary is clipped.
     ctx.save();
-
     ctx.beginPath();
-    ctx.rect(v.x, v.y, v.w, v.h);
+    ctx.rect(0, 0, W, H);
     ctx.clip();
+
+    // Subtle world floor so the map remains visible over the Riot page.
+    ctx.fillStyle = "rgba(10,12,18,.055)";
+    ctx.fillRect(0, 0, W, H);
 
     // Subtle grid that blends into the existing dashboard.
     ctx.strokeStyle = "rgba(255,255,255,.045)";
@@ -1239,8 +1236,8 @@
 
     const pos = worldToScreen(p.x, p.y);
 
-    // If the fitted map is tiny on a very large screen, keep soldiers readable.
-    const radius = Math.max(6, Math.min(13, 16 * worldViewport().scale * 2.2));
+    // Keep soldiers readable at every viewport size.
+    const radius = Math.max(9, Math.min(18, 16 * worldViewport().scale));
     const bodyColor =
       p.id === myId
         ? "#42b982"
