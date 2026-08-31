@@ -10,7 +10,7 @@ const CLASSES = {
   assaulter: {
     damage: 25,
     range: 700,
-    fireRate: 120,
+    fireRate: 90,
     reload: 0,
     pellets: 1
   },
@@ -47,7 +47,7 @@ const UPGRADE_COST_STEP = 10;
 
 const MAX_UPGRADE_LEVEL = 10;
 
-const MOVE_BASE_SPEED = 6.5;
+const MOVE_BASE_SPEED = 14;
 const MOVE_UPGRADE_SPEED = 0.25;
 
 const ASSAULTER_MIN_DAMAGE_MULTIPLIER = 0.25;
@@ -1269,7 +1269,7 @@ export class RiotRoom {
   ) {
 
     const speed =
-      32;
+      18;
 
 
     room.projectiles.push({
