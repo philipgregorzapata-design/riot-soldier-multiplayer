@@ -47,7 +47,7 @@ const UPGRADE_COST_STEP = 10;
 
 const MAX_UPGRADE_LEVEL = 10;
 
-const MOVE_BASE_SPEED = 14;
+const MOVE_BASE_SPEED = 24;
 const MOVE_UPGRADE_SPEED = 0.25;
 
 const ASSAULTER_MIN_DAMAGE_MULTIPLIER = 0.25;
@@ -1269,7 +1269,7 @@ export class RiotRoom {
   ) {
 
     const speed =
-      18;
+      10;
 
 
     room.projectiles.push({
