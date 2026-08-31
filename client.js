@@ -1,4 +1,22 @@
 (() => {
+  "use strict";
+
+  /*
+   * RIOT SOLDIER MULTIPLAYER
+   * Client for the Cloudflare Worker server.
+   *
+   * Controls:
+   *   W A S D  = movement
+   *   Mouse    = aim
+   *   LMB      = fire
+   *
+   * Classes:
+   *   ASSAULTER = hold LMB, rapid fire
+   *   SNIPER    = one click / one shot
+   *   RPG       = one click / missile / explosion
+   *   SHOTGUN   = one click / spread
+   */
+
   window.__riotSoldierCleanup?.();
   document.getElementById("riot-soldier-battle")?.remove();
 
@@ -7,383 +25,492 @@
 
   root.innerHTML = `
     <style>
-      #riot-soldier-battle{
-        position:fixed;
-        inset:0;
-        width:100vw;
-        height:100vh;
-        z-index:999999;
-        overflow:hidden;
-        font-family:Arial,sans-serif;
-        pointer-events:none;
-        background:#0b0e14;
+      #riot-soldier-battle {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 999999;
+        overflow: hidden;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #fff;
+        pointer-events: none;
+        user-select: none;
       }
 
-      #riot-soldier-canvas{
-        position:absolute;
-        inset:0;
-        width:100%;
-        height:100%;
-        pointer-events:none;
+      #riot-soldier-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        pointer-events: none;
       }
 
-      /* TOP ROOM CONTROLS */
-      #riot-soldier-controls{
-        position:fixed;
-        top:12px;
-        left:50%;
-        transform:translateX(-50%);
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        gap:7px;
-        flex-wrap:wrap;
-        z-index:1000001;
-        pointer-events:auto;
+      .riot-panel {
+        background: rgba(10, 13, 20, .88);
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 9px;
+        box-shadow: 0 8px 28px rgba(0,0,0,.35);
+        backdrop-filter: blur(8px);
       }
 
-      .riot-box,
-      .riot-button{
-        box-sizing:border-box;
-        padding:7px 9px;
-        border-radius:7px;
-        background:rgba(12,15,24,.91);
-        border:1px solid rgba(255,255,255,.12);
-        color:rgba(255,255,255,.94);
-        font-size:10px;
-        font-weight:700;
-        letter-spacing:.7px;
-        box-shadow:0 4px 18px rgba(0,0,0,.25);
-        backdrop-filter:blur(8px);
+      #riot-soldier-controls {
+        position: fixed;
+        left: 14px;
+        bottom: 46px;
+        z-index: 1000001;
+        width: 220px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        pointer-events: auto;
       }
 
-      .riot-input{
-        width:150px;
-        margin-left:5px;
-        padding:6px 7px;
-        border-radius:5px;
-        border:1px solid #444;
-        background:#181b24;
-        color:white;
-        outline:none;
-        pointer-events:auto;
-        box-sizing:border-box;
+      #riot-soldier-room-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 9px;
       }
 
-      /* Room key now supports letters + numbers */
-      #riot-soldier-key{
-        width:130px;
-        text-transform:uppercase;
-        letter-spacing:1px;
-        font-family:monospace;
+      .riot-label {
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 1.2px;
+        opacity: .72;
       }
 
-      .riot-button{
-        cursor:pointer;
+      .riot-input {
+        box-sizing: border-box;
+        width: 100%;
+        height: 31px;
+        padding: 5px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,.14);
+        outline: none;
+        background: #171b25;
+        color: #fff;
+        font-size: 11px;
+        user-select: text;
       }
 
-      .riot-button:hover{
-        background:rgba(215,48,76,.85);
+      .riot-input:focus {
+        border-color: rgba(255,73,101,.8);
       }
 
-      #riot-soldier-status{
-        min-width:100px;
-        text-align:center;
+      #riot-soldier-key {
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-weight: 800;
       }
 
-      /* ROOM KEY ABOVE JOIN ROOM */
-      #riot-soldier-room{
-        position:fixed;
-        top:58px;
-        left:50%;
-        transform:translateX(-50%);
-        z-index:1000001;
-        display:none;
+      .riot-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
       }
 
-      #riot-soldier-room-key{
-        color:#ff4965;
-        font-size:12px;
+      .riot-button {
+        height: 30px;
+        border: 1px solid rgba(255,255,255,.13);
+        border-radius: 6px;
+        background: #171b25;
+        color: #fff;
+        cursor: pointer;
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1px;
       }
 
-      /* PLAYER LIST LEFT CORNER */
-      #riot-soldier-list{
-        position:fixed;
-        top:72px;
-        left:10px;
-        z-index:1000001;
-        width:170px;
-        display:none;
+      .riot-button:hover {
+        background: #292e3b;
       }
 
-      #riot-soldier-list-title{
-        margin-bottom:6px;
-        color:white;
+      .riot-button:active {
+        transform: translateY(1px);
       }
 
-      .riot-player{
-        font-size:9px;
-        padding:3px 0;
-        color:rgba(255,255,255,.76);
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
+      #riot-soldier-join {
+        background: rgba(211,48,75,.75);
       }
 
-      .riot-player.you{
-        color:#42b982;
+      #riot-soldier-join:hover {
+        background: rgba(230,58,85,.95);
       }
 
-      /* AUX / KILL HUD */
-      #riot-soldier-hud{
-        position:fixed;
-        left:10px;
-        bottom:10px;
-        z-index:1000001;
-        display:none;
-        pointer-events:none;
+      #riot-soldier-room {
+        position: fixed;
+        left: 14px;
+        bottom: 375px;
+        z-index: 1000001;
+        min-width: 205px;
+        padding: 8px 10px;
+        display: none;
+        pointer-events: none;
       }
 
-      #riot-soldier-hud .small{
-        font-size:9px;
-        line-height:1.5;
+      #riot-soldier-room-key {
+        color: #ff536c;
+        font-size: 13px;
+        letter-spacing: 2px;
+        font-weight: 900;
       }
 
-      /* SMALL ONLINE STATUS */
-      #riot-soldier-online{
-        position:fixed;
-        right:9px;
-        bottom:9px;
-        z-index:1000001;
-        display:none;
-        padding:5px 7px;
-        min-width:0;
-        font-size:8px;
-        opacity:.68;
-        pointer-events:none;
+      #riot-soldier-status {
+        position: fixed;
+        right: 12px;
+        bottom: 10px;
+        z-index: 1000001;
+        padding: 5px 8px;
+        min-width: 92px;
+        text-align: center;
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        pointer-events: none;
       }
 
-      /* CLASS SELECT */
-      #riot-soldier-classbar{
-        position:fixed;
-        right:10px;
-        bottom:42px;
-        z-index:1000001;
-        display:none;
-        pointer-events:auto;
+      #riot-soldier-player-list {
+        position: fixed;
+        left: 12px;
+        top: 12px;
+        z-index: 1000001;
+        width: 175px;
+        padding: 9px 10px;
+        display: none;
+        pointer-events: none;
       }
 
-      #riot-soldier-class{
-        padding:5px 7px;
-        border-radius:5px;
-        border:1px solid #444;
-        background:#181b24;
-        color:#fff;
-        font-size:9px;
+      #riot-soldier-player-title {
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1.5px;
+        margin-bottom: 6px;
       }
 
-      /* UPGRADES */
-      #riot-soldier-upgrades{
-        position:fixed;
-        right:10px;
-        bottom:76px;
-        z-index:1000001;
-        width:180px;
-        display:none;
-        pointer-events:auto;
+      .riot-player-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 3px 0;
+        font-size: 9px;
+        color: rgba(255,255,255,.72);
       }
 
-      .upgrade{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:8px;
-        margin:5px 0;
-        font-size:9px;
+      .riot-player-row.you {
+        color: #65e0a2;
       }
 
-      .upgrade button{
-        border:1px solid rgba(255,255,255,.15);
-        background:#181b24;
-        color:#fff;
-        border-radius:4px;
-        padding:3px 6px;
-        font-size:8px;
-        cursor:pointer;
+      .riot-player-class {
+        opacity: .5;
+        font-size: 8px;
       }
 
-      .upgrade button:hover{
-        background:#313746;
+      #riot-soldier-player-count {
+        position: fixed;
+        right: 12px;
+        top: 12px;
+        z-index: 1000001;
+        padding: 6px 8px;
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        pointer-events: none;
       }
 
-      @media(max-width:700px){
-        #riot-soldier-controls{
-          width:96%;
+      #riot-soldier-hud {
+        position: fixed;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        z-index: 1000001;
+        min-width: 270px;
+        padding: 8px 12px;
+        text-align: center;
+        pointer-events: none;
+      }
+
+      #riot-soldier-class-name {
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 2px;
+      }
+
+      #riot-soldier-hp {
+        margin-top: 5px;
+        height: 5px;
+        border-radius: 4px;
+        overflow: hidden;
+        background: rgba(255,255,255,.12);
+      }
+
+      #riot-soldier-hp-fill {
+        width: 100%;
+        height: 100%;
+        background: #52d58b;
+        transition: width .12s linear;
+      }
+
+      #riot-soldier-aux {
+        margin-top: 5px;
+        color: #ffd45a;
+        font-size: 10px;
+        font-weight: 900;
+      }
+
+      #riot-soldier-upgrades {
+        position: fixed;
+        right: 12px;
+        bottom: 42px;
+        z-index: 1000001;
+        width: 185px;
+        padding: 9px;
+        display: none;
+        pointer-events: auto;
+      }
+
+      .riot-upgrade-title {
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1.4px;
+        margin-bottom: 7px;
+      }
+
+      .riot-upgrade {
+        width: 100%;
+        height: 29px;
+        margin-top: 5px;
+        border: 1px solid rgba(255,255,255,.11);
+        border-radius: 6px;
+        background: #171b25;
+        color: #fff;
+        text-align: left;
+        padding: 0 8px;
+        font-size: 8px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .riot-upgrade:hover {
+        background: #282e3a;
+      }
+
+      .riot-upgrade span {
+        float: right;
+        color: #ffd45a;
+      }
+
+      #riot-soldier-class-panel {
+        position: fixed;
+        left: 50%;
+        top: 12px;
+        transform: translateX(-50%);
+        z-index: 1000001;
+        display: none;
+        padding: 7px;
+        gap: 5px;
+        pointer-events: auto;
+      }
+
+      .riot-class-button {
+        border: 1px solid rgba(255,255,255,.11);
+        border-radius: 6px;
+        padding: 6px 8px;
+        background: #171b25;
+        color: rgba(255,255,255,.75);
+        cursor: pointer;
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: .7px;
+      }
+
+      .riot-class-button.active {
+        color: #fff;
+        background: rgba(211,48,75,.78);
+        border-color: rgba(255,83,108,.8);
+      }
+
+      #riot-soldier-kill-feed {
+        position: fixed;
+        left: 14px;
+        top: 205px;
+        z-index: 1000001;
+        pointer-events: none;
+      }
+
+      .riot-feed {
+        margin-top: 4px;
+        color: #ffd45a;
+        font-size: 10px;
+        font-weight: 900;
+        text-shadow: 0 1px 5px #000;
+        animation: riotFade 2.5s forwards;
+      }
+
+      @keyframes riotFade {
+        0% {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        70% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translateX(12px);
+        }
+      }
+
+      #riot-soldier-help {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1000000;
+        color: rgba(255,255,255,.45);
+        font-size: 9px;
+        letter-spacing: 1px;
+        pointer-events: none;
+        text-align: center;
+      }
+
+      @media (max-width: 700px) {
+        #riot-soldier-controls {
+          width: 180px;
         }
 
-        .riot-input{
-          width:115px;
+        #riot-soldier-player-list {
+          width: 140px;
         }
 
-        #riot-soldier-list{
-          top:112px;
+        #riot-soldier-upgrades {
+          width: 155px;
+        }
+
+        .riot-class-button {
+          padding: 5px;
+          font-size: 7px;
         }
       }
     </style>
 
     <canvas id="riot-soldier-canvas"></canvas>
 
-    <div id="riot-soldier-controls">
+    <div id="riot-soldier-controls" class="riot-panel">
+      <div id="riot-soldier-room-controls">
+        <div class="riot-label">SERVER</div>
 
-      <div class="riot-box">
-        SERVER
         <input
           id="riot-soldier-server"
           class="riot-input"
-          placeholder="wss://YOUR-VM/ws"
+          value="wss://riot-soldier-multiplayer.philipgregorzapata.workers.dev/ws"
+          placeholder="wss://your-worker.workers.dev/ws"
           autocomplete="off"
+          spellcheck="false"
         >
-      </div>
 
-      <div class="riot-box">
-        ROOM KEY
+        <div class="riot-label">ROOM KEY</div>
+
         <input
           id="riot-soldier-key"
           class="riot-input"
-          placeholder="ABCD-1234"
+          placeholder="ROOM123"
           maxlength="32"
           autocomplete="off"
-          autocapitalize="characters"
           spellcheck="false"
         >
+
+        <div class="riot-buttons">
+          <button id="riot-soldier-join" class="riot-button">
+            JOIN ROOM
+          </button>
+
+          <button id="riot-soldier-leave" class="riot-button">
+            LEAVE
+          </button>
+        </div>
       </div>
-
-      <button id="riot-soldier-join" class="riot-button">
-        JOIN ROOM
-      </button>
-
-      <button id="riot-soldier-leave" class="riot-button">
-        LEAVE
-      </button>
-
-      <div id="riot-soldier-status" class="riot-box">
-        OFFLINE
-      </div>
-
     </div>
 
-    <div id="riot-soldier-room" class="riot-box">
+    <div id="riot-soldier-room" class="riot-panel">
       ROOM:
       <span id="riot-soldier-room-key"></span>
     </div>
 
-    <div id="riot-soldier-list" class="riot-box">
-      <div id="riot-soldier-list-title">
-        PLAYERS
-      </div>
+    <div id="riot-soldier-status" class="riot-panel">
+      OFFLINE
+    </div>
 
+    <div id="riot-soldier-player-list" class="riot-panel">
+      <div id="riot-soldier-player-title">PLAYERS</div>
       <div id="riot-soldier-players"></div>
     </div>
 
-    <div id="riot-soldier-hud" class="riot-box">
-
-      <div class="small">
-        CLASS:
-        <b id="riot-class-label">ASSAULTER</b>
-      </div>
-
-      <div class="small">
-        HP:
-        <b id="riot-hp-label">100</b>
-        · AUX:
-        <b id="riot-aux-label">0</b>
-      </div>
-
-      <div class="small">
-        LAST KILL:
-        +<b id="riot-kill-aux">0</b> AUX
-      </div>
-
-      <div class="small">
-        WASD MOVE · MOUSE AIM/FIRE
-      </div>
-
-      <div class="small">
-        1 ASSAULTER · 2 SNIPER · 3 RPG · 4 SHOTGUN
-      </div>
-
+    <div id="riot-soldier-player-count" class="riot-panel">
+      PLAYERS: 0 / 10
     </div>
 
-    <div id="riot-soldier-upgrades" class="riot-box">
+    <div id="riot-soldier-class-panel" class="riot-panel">
+      <button class="riot-class-button active" data-class="assaulter">
+        ASSAULTER
+      </button>
 
-      <b>UPGRADES</b>
+      <button class="riot-class-button" data-class="sniper">
+        SNIPER
+      </button>
 
-      <div class="upgrade">
-        <span>
-          RELOAD LV
-          <b id="up-reload">0</b>
-        </span>
+      <button class="riot-class-button" data-class="rpg">
+        RPG
+      </button>
 
-        <button data-up="reload">
-          + AUX
-        </button>
-      </div>
-
-      <div class="upgrade">
-        <span>
-          FIRE LV
-          <b id="up-fire">0</b>
-        </span>
-
-        <button data-up="fire">
-          + AUX
-        </button>
-      </div>
-
-      <div class="upgrade">
-        <span>
-          MOVE LV
-          <b id="up-move">0</b>
-        </span>
-
-        <button data-up="move">
-          + AUX
-        </button>
-      </div>
-
+      <button class="riot-class-button" data-class="shotgun">
+        SHOTGUN
+      </button>
     </div>
 
-    <div id="riot-soldier-classbar" class="riot-box">
+    <div id="riot-soldier-upgrades" class="riot-panel">
+      <div class="riot-upgrade-title">
+        AUX UPGRADES
+      </div>
 
-      CLASS
+      <button class="riot-upgrade" data-upgrade="reload">
+        RELOAD SPEED
+        <span id="riot-reload-level">LV 0</span>
+      </button>
 
-      <select id="riot-soldier-class">
+      <button class="riot-upgrade" data-upgrade="fire">
+        SHOOTING SPEED
+        <span id="riot-fire-level">LV 0</span>
+      </button>
 
-        <option value="assaulter">
-          1 ASSAULTER
-        </option>
-
-        <option value="sniper">
-          2 SNIPER
-        </option>
-
-        <option value="rpg">
-          3 RPG
-        </option>
-
-        <option value="shotgun">
-          4 SHOTGUN
-        </option>
-
-      </select>
-
+      <button class="riot-upgrade" data-upgrade="move">
+        MOVEMENT SPEED
+        <span id="riot-move-level">LV 0</span>
+      </button>
     </div>
 
-    <div id="riot-soldier-online" class="riot-box">
+    <div id="riot-soldier-hud" class="riot-panel">
+      <div id="riot-soldier-class-name">
+        ASSAULTER
+      </div>
 
-      ONLINE ·
-      <span id="riot-soldier-player-count">0</span>/10
+      <div id="riot-soldier-hp">
+        <div id="riot-soldier-hp-fill"></div>
+      </div>
 
+      <div id="riot-soldier-aux">
+        AUX: 0
+      </div>
+    </div>
+
+    <div id="riot-soldier-kill-feed"></div>
+
+    <div id="riot-soldier-help">
+      W A S D &nbsp; MOVE &nbsp; • &nbsp;
+      MOUSE &nbsp; AIM &nbsp; • &nbsp;
+      LMB &nbsp; FIRE
     </div>
   `;
 
@@ -392,7 +519,8 @@
   const canvas =
     root.querySelector("#riot-soldier-canvas");
 
-  const ctx = canvas.getContext("2d");
+  const ctx =
+    canvas.getContext("2d");
 
   const serverInput =
     root.querySelector("#riot-soldier-server");
@@ -412,11 +540,11 @@
   const roomBox =
     root.querySelector("#riot-soldier-room");
 
-  const roomKey =
+  const roomKeyElement =
     root.querySelector("#riot-soldier-room-key");
 
   const playerList =
-    root.querySelector("#riot-soldier-list");
+    root.querySelector("#riot-soldier-player-list");
 
   const playersElement =
     root.querySelector("#riot-soldier-players");
@@ -424,123 +552,188 @@
   const playerCount =
     root.querySelector("#riot-soldier-player-count");
 
-  const hud =
-    root.querySelector("#riot-soldier-hud");
+  const classPanel =
+    root.querySelector("#riot-soldier-class-panel");
 
-  const classSelect =
-    root.querySelector("#riot-soldier-class");
-
-  const classLabel =
-    root.querySelector("#riot-class-label");
-
-  const hpLabel =
-    root.querySelector("#riot-hp-label");
-
-  const auxLabel =
-    root.querySelector("#riot-aux-label");
-
-  const killAux =
-    root.querySelector("#riot-kill-aux");
-
-  const upgrades =
+  const upgradePanel =
     root.querySelector("#riot-soldier-upgrades");
 
-  const classbar =
-    root.querySelector("#riot-soldier-classbar");
+  const classNameElement =
+    root.querySelector("#riot-soldier-class-name");
 
-  const online =
-    root.querySelector("#riot-soldier-online");
+  const hpFill =
+    root.querySelector("#riot-soldier-hp-fill");
 
-  let W = innerWidth;
-  let H = innerHeight;
+  const auxElement =
+    root.querySelector("#riot-soldier-aux");
 
-  let animationId = 0;
-  let inputTimer = 0;
-  let destroyed = false;
+  const reloadLevelElement =
+    root.querySelector("#riot-reload-level");
 
-  let ws = null;
-  let connected = false;
-  let myId = null;
-  let currentRoom = null;
+  const fireLevelElement =
+    root.querySelector("#riot-fire-level");
 
-  const players = Object.create(null);
-  const keys = Object.create(null);
+  const moveLevelElement =
+    root.querySelector("#riot-move-level");
 
-  let mouseX = W / 2;
-  let mouseY = H / 2;
-  let mouseDown = false;
+  const killFeed =
+    root.querySelector("#riot-soldier-kill-feed");
 
-  const localProgress = {
-    aux: 0,
-    reload: 0,
-    fire: 0,
-    move: 0
+  const help =
+    root.querySelector("#riot-soldier-help");
+
+
+  /* =========================================================
+     GAME CONSTANTS
+  ========================================================= */
+
+  const WORLD_WIDTH = 5000;
+  const WORLD_HEIGHT = 5000;
+
+  const MAX_PLAYERS = 10;
+
+  const CLASSES = {
+    assaulter: {
+      label: "ASSAULTER",
+      color: "#42b982"
+    },
+
+    sniper: {
+      label: "SNIPER",
+      color: "#82b1ff"
+    },
+
+    rpg: {
+      label: "RPG",
+      color: "#f39b70"
+    },
+
+    shotgun: {
+      label: "SHOTGUN",
+      color: "#e8c878"
+    }
   };
 
-  const palette = [
-    "#42b982",
-    "#e3485c",
-    "#82b1ff",
-    "#e8c878",
-    "#f39b70",
-    "#b58cff",
-    "#5bd7d0",
-    "#ff8ca1",
-    "#d2e66e",
-    "#ff9b52"
-  ];
 
-  /*
-   * RANDOM MAP OBSTACLES
-   *
-   * These are regenerated when the game window changes.
-   * Worker-side collision will be added in the server update.
-   */
+  /* =========================================================
+     STATE
+  ========================================================= */
 
-  const obstacles = [];
+  let W = window.innerWidth;
+  let H = window.innerHeight;
 
-  function generateMap() {
+  let dpr = 1;
 
-    obstacles.length = 0;
+  let ws = null;
 
-    const count =
-      12 + Math.floor(Math.random() * 9);
+  let connected = false;
 
-    for (let i = 0; i < count; i++) {
+  let myId = null;
 
-      const w =
-        45 + Math.random() * 105;
+  let currentRoom = null;
 
-      const h =
-        35 + Math.random() * 80;
+  let currentMap = [];
 
-      obstacles.push({
+  let projectiles = [];
 
-        x:
-          25 +
-          Math.random() *
-          Math.max(40, W - w - 50),
+  let animationId = 0;
 
-        y:
-          82 +
-          Math.random() *
-          Math.max(40, H - h - 105),
+  let inputTimer = 0;
 
-        w,
-        h,
+  let destroyed = false;
 
-        label:"AUX"
-      });
-    }
+  let mouseX = W / 2;
+
+  let mouseY = H / 2;
+
+  let mouseDown = false;
+
+  let lastMouseDown = false;
+
+  let pulseShot = false;
+
+  let selectedClass = "assaulter";
+
+  let cameraX = WORLD_WIDTH / 2;
+
+  let cameraY = WORLD_HEIGHT / 2;
+
+  let lastStateTime = 0;
+
+  let serverLatency = 0;
+
+  const keys = Object.create(null);
+
+  const players = Object.create(null);
+
+
+  /* =========================================================
+     HELPERS
+  ========================================================= */
+
+  function setStatus(text) {
+    status.textContent = text;
   }
+
+
+  function clamp(value, min, max) {
+    return Math.max(
+      min,
+      Math.min(max, value)
+    );
+  }
+
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+
+  function normalizeAngle(angle) {
+    while (angle > Math.PI) {
+      angle -= Math.PI * 2;
+    }
+
+    while (angle < -Math.PI) {
+      angle += Math.PI * 2;
+    }
+
+    return angle;
+  }
+
+
+  function lerpAngle(a, b, t) {
+    const diff =
+      normalizeAngle(b - a);
+
+    return a + diff * t;
+  }
+
+
+  function escapeHTML(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+
+  /* =========================================================
+     RESIZE
+  ========================================================= */
 
   function resize() {
 
-    W = innerWidth;
-    H = innerHeight;
+    W = window.innerWidth;
+    H = window.innerHeight;
 
-    const dpr =
-      Math.min(devicePixelRatio || 1, 2);
+    dpr =
+      Math.min(
+        window.devicePixelRatio || 1,
+        2
+      );
 
     canvas.width =
       Math.floor(W * dpr);
@@ -562,324 +755,214 @@
       0,
       0
     );
-
-    generateMap();
   }
 
-  function setStatus(text) {
-    status.textContent = text;
+
+  /* =========================================================
+     CONNECTION
+  ========================================================= */
+
+  function normalizeServerURL(value) {
+
+    let url =
+      String(value || "")
+        .trim();
+
+    if (!url) {
+      return "";
+    }
+
+    /*
+      Automatically convert the normal
+      Cloudflare HTTPS worker URL to
+      the WebSocket endpoint.
+    */
+
+    if (
+      /^https:\/\//i.test(url)
+    ) {
+
+      url =
+        url.replace(
+          /^https:\/\//i,
+          "wss://"
+        );
+    }
+
+    else if (
+      /^http:\/\//i.test(url)
+    ) {
+
+      url =
+        url.replace(
+          /^http:\/\//i,
+          "ws://"
+        );
+    }
+
+
+    if (
+      /^wss?:\/\//i.test(url) &&
+      !url.endsWith("/ws")
+    ) {
+
+      url =
+        url.replace(
+          /\/+$/,
+          ""
+        ) + "/ws";
+    }
+
+
+    return url;
   }
 
-  function randomSpawn() {
 
-    return {
+  function connect() {
 
-      x:
-        70 +
-        Math.random() *
-        Math.max(100, W - 140),
+    const server =
+      normalizeServerURL(
+        serverInput.value
+      );
 
-      y:
-        100 +
-        Math.random() *
-        Math.max(100, H - 170)
+    const key =
+      keyInput.value
+        .trim()
+        .toUpperCase();
 
-    };
-  }
 
-  function normalizePlayer(data) {
+    if (!server) {
 
-    const spawn =
-      randomSpawn();
-
-    return {
-
-      id:data.id,
-
-      name:
-        data.name ||
-        "PLAYER",
-
-      x:
-        Number.isFinite(data.x)
-          ? data.x
-          : spawn.x,
-
-      y:
-        Number.isFinite(data.y)
-          ? data.y
-          : spawn.y,
-
-      targetX:
-        Number.isFinite(data.x)
-          ? data.x
-          : spawn.x,
-
-      targetY:
-        Number.isFinite(data.y)
-          ? data.y
-          : spawn.y,
-
-      angle:
-        Number.isFinite(data.angle)
-          ? data.angle
-          : 0,
-
-      targetAngle:
-        Number.isFinite(data.angle)
-          ? data.angle
-          : 0,
-
-      hp:
-        Number.isFinite(data.hp)
-          ? data.hp
-          : 100,
-
-      maxHp:
-        Number.isFinite(data.maxHp)
-          ? data.maxHp
-          : 100,
-
-      class:
-        data.class ||
-        "assaulter",
-
-      alive:
-        data.alive !== false,
-
-      aux:
-        Number.isFinite(data.aux)
-          ? data.aux
-          : 0,
-
-      reloadLevel:
-        Number(data.reloadLevel || 0),
-
-      fireLevel:
-        Number(data.fireLevel || 0),
-
-      moveLevel:
-        Number(data.moveLevel || 0)
-
-    };
-  }
-
-  function updatePlayer(data) {
-
-    if (!data || data.id == null)
-      return;
-
-    const existing =
-      players[data.id];
-
-    if (!existing) {
-
-      players[data.id] =
-        normalizePlayer(data);
+      setStatus(
+        "ENTER SERVER"
+      );
 
       return;
     }
 
-    existing.name =
-      data.name ||
-      existing.name;
 
-    if (Number.isFinite(data.x))
-      existing.targetX = data.x;
+    if (!/^wss?:\/\//i.test(server)) {
 
-    if (Number.isFinite(data.y))
-      existing.targetY = data.y;
+      setStatus(
+        "INVALID SERVER"
+      );
 
-    if (Number.isFinite(data.angle))
-      existing.targetAngle =
-        data.angle;
-
-    if (Number.isFinite(data.hp))
-      existing.hp =
-        data.hp;
-
-    if (Number.isFinite(data.maxHp))
-      existing.maxHp =
-        data.maxHp;
-
-    if (data.class)
-      existing.class =
-        data.class;
-
-    existing.alive =
-      data.alive !== false;
-
-    if (Number.isFinite(data.aux))
-      existing.aux =
-        data.aux;
-
-    if (data.reloadLevel != null)
-      existing.reloadLevel =
-        Number(data.reloadLevel);
-
-    if (data.fireLevel != null)
-      existing.fireLevel =
-        Number(data.fireLevel);
-
-    if (data.moveLevel != null)
-      existing.moveLevel =
-        Number(data.moveLevel);
-  }
-
-  function syncMyHud() {
-
-    const me =
-      players[myId];
-
-    if (!me)
       return;
+    }
 
-    localProgress.aux =
-      Number(me.aux || 0);
 
-    localProgress.reload =
-      Number(me.reloadLevel || 0);
+    if (!key) {
 
-    localProgress.fire =
-      Number(me.fireLevel || 0);
-
-    localProgress.move =
-      Number(me.moveLevel || 0);
-
-    classSelect.value =
-      me.class ||
-      "assaulter";
-
-    classLabel.textContent =
-      String(
-        me.class ||
-        "assaulter"
-      ).toUpperCase();
-
-    hpLabel.textContent =
-      Math.max(
-        0,
-        Math.ceil(me.hp ?? 100)
+      setStatus(
+        "ENTER ROOM KEY"
       );
 
-    auxLabel.textContent =
-      localProgress.aux;
+      keyInput.focus();
 
-    root.querySelector(
-      "#up-reload"
-    ).textContent =
-      localProgress.reload;
+      return;
+    }
 
-    root.querySelector(
-      "#up-fire"
-    ).textContent =
-      localProgress.fire;
 
-    root.querySelector(
-      "#up-move"
-    ).textContent =
-      localProgress.move;
-  }
+    closeSocket();
 
-  function updatePlayerList() {
+    clearPlayers();
 
-    const list =
-      Object.values(players);
+    connected = false;
 
-    playerCount.textContent =
-      list.length;
+    myId = null;
 
-    playersElement.innerHTML =
-      "";
+    currentRoom = null;
 
-    list.forEach(
-      (player,index) => {
-
-        const row =
-          document.createElement("div");
-
-        row.className =
-          "riot-player" +
-          (
-            player.id === myId
-              ? " you"
-              : ""
-          );
-
-        row.textContent =
-          `${index + 1}. ${
-            player.id === myId
-              ? "YOU"
-              : player.name
-          } · ${
-            String(
-              player.class ||
-              "assaulter"
-            ).toUpperCase()
-          }`;
-
-        playersElement.appendChild(row);
-
-      }
+    setStatus(
+      "CONNECTING..."
     );
-  }
 
-  function showGameUI() {
 
-    roomBox.style.display =
-      "block";
+    try {
 
-    playerList.style.display =
-      "block";
+      ws =
+        new WebSocket(
+          server
+        );
 
-    hud.style.display =
-      "block";
+    } catch {
 
-    upgrades.style.display =
-      "block";
-
-    classbar.style.display =
-      "block";
-
-    online.style.display =
-      "block";
-  }
-
-  function resetConnectionUI() {
-
-    roomBox.style.display =
-      "none";
-
-    playerList.style.display =
-      "none";
-
-    hud.style.display =
-      "none";
-
-    upgrades.style.display =
-      "none";
-
-    classbar.style.display =
-      "none";
-
-    online.style.display =
-      "none";
-  }
-
-  function clearPlayers() {
-
-    Object.keys(players)
-      .forEach(
-        id => delete players[id]
+      setStatus(
+        "INVALID SERVER"
       );
 
-    updatePlayerList();
+      return;
+    }
+
+
+    ws.onopen = () => {
+
+      if (!ws) {
+        return;
+      }
+
+
+      setStatus(
+        "JOINING ROOM..."
+      );
+
+
+      send({
+        type:
+          "join_room",
+
+        key
+      });
+    };
+
+
+    ws.onmessage =
+      handleServerMessage;
+
+
+    ws.onerror = () => {
+
+      setStatus(
+        "SERVER ERROR"
+      );
+    };
+
+
+    ws.onclose = () => {
+
+      connected = false;
+
+      myId = null;
+
+      currentRoom = null;
+
+      projectiles = [];
+
+      roomBox.style.display =
+        "none";
+
+      playerList.style.display =
+        "none";
+
+      classPanel.style.display =
+        "none";
+
+      upgradePanel.style.display =
+        "none";
+
+      setStatus(
+        "OFFLINE"
+      );
+    };
   }
+
 
   function closeSocket() {
 
-    if (!ws)
+    if (!ws) {
       return;
+    }
+
 
     try {
 
@@ -892,357 +975,903 @@
 
     } catch {}
 
+
     ws = null;
   }
 
-  function connect() {
 
-    const server =
-      serverInput.value.trim();
+  function send(data) {
 
-    const key =
-      keyInput.value
-        .trim()
-        .toUpperCase();
+    if (
+      !ws ||
+      ws.readyState !==
+        WebSocket.OPEN
+    ) {
 
-    if (!server) {
-
-      setStatus(
-        "ENTER SERVER"
-      );
-
-      return;
+      return false;
     }
 
-    if (!key) {
-
-      setStatus(
-        "ENTER ROOM KEY"
-      );
-
-      return;
-    }
-
-    if (!/^wss?:\\/\\//i.test(server)) {
-
-      setStatus(
-        "USE ws:// OR wss://"
-      );
-
-      return;
-    }
-
-    closeSocket();
-    clearPlayers();
-
-    connected = false;
-    myId = null;
-    currentRoom = null;
 
     try {
 
-      ws =
-        new WebSocket(server);
+      ws.send(
+        JSON.stringify(data)
+      );
+
+      return true;
 
     } catch {
 
+      return false;
+    }
+  }
+
+
+  /* =========================================================
+     SERVER MESSAGE
+  ========================================================= */
+
+  function handleServerMessage(event) {
+
+    let message;
+
+
+    try {
+
+      message =
+        JSON.parse(
+          event.data
+        );
+
+    } catch {
+
+      return;
+    }
+
+
+    if (
+      message.type ===
+      "joined"
+    ) {
+
+      connected = true;
+
+      myId =
+        message.player_id;
+
+      currentRoom =
+        message.room || "";
+
+      currentMap =
+        Array.isArray(
+          message.map
+        )
+          ? message.map
+          : [];
+
+
+      roomKeyElement.textContent =
+        currentRoom;
+
+
+      roomBox.style.display =
+        "block";
+
+      playerList.style.display =
+        "block";
+
+      classPanel.style.display =
+        "flex";
+
+      upgradePanel.style.display =
+        "block";
+
+      help.style.display =
+        "none";
+
+
       setStatus(
-        "INVALID SERVER"
+        message.is_host
+          ? "ONLINE • HOST"
+          : "ONLINE"
+      );
+
+
+      return;
+    }
+
+
+    if (
+      message.type ===
+      "state"
+    ) {
+
+      applyState(
+        message
       );
 
       return;
     }
 
-    setStatus(
-      "CONNECTING..."
+
+    if (
+      message.type ===
+      "hit"
+    ) {
+
+      const amount =
+        Number(
+          message.aux || 0
+        );
+
+
+      if (amount > 0) {
+
+        addFeed(
+          "+" +
+          amount +
+          " AUX  •  KILL"
+        );
+      }
+
+
+      return;
+    }
+
+
+    if (
+      message.type ===
+      "player_stats"
+    ) {
+
+      const me =
+        players[myId];
+
+      if (me) {
+
+        me.aux =
+          Number(
+            message.aux ??
+            me.aux
+          );
+
+        me.reloadLevel =
+          Number(
+            message.reloadLevel ??
+            me.reloadLevel ??
+            0
+          );
+
+        me.fireLevel =
+          Number(
+            message.fireLevel ??
+            me.fireLevel ??
+            0
+          );
+
+        me.moveLevel =
+          Number(
+            message.moveLevel ??
+            me.moveLevel ??
+            0
+          );
+      }
+
+
+      updateHUD();
+
+      return;
+    }
+
+
+    if (
+      message.type ===
+      "player_left"
+    ) {
+
+      delete players[
+        message.player_id
+      ];
+
+      updatePlayerList();
+
+      return;
+    }
+
+
+    if (
+      message.type ===
+      "error"
+    ) {
+
+      setStatus(
+        String(
+          message.message ||
+          "SERVER ERROR"
+        )
+      );
+
+      return;
+    }
+
+
+    if (
+      message.type ===
+      "pong"
+    ) {
+
+      serverLatency =
+        Date.now() -
+        lastStateTime;
+
+      return;
+    }
+  }
+
+
+  /* =========================================================
+     STATE
+  ========================================================= */
+
+  function applyState(message) {
+
+    lastStateTime =
+      Date.now();
+
+
+    if (
+      Array.isArray(
+        message.map
+      )
+    ) {
+
+      currentMap =
+        message.map;
+    }
+
+
+    projectiles =
+      Array.isArray(
+        message.projectiles
+      )
+        ? message.projectiles
+        : [];
+
+
+    const incoming =
+      Array.isArray(
+        message.players
+      )
+        ? message.players
+        : [];
+
+
+    const incomingIds =
+      new Set(
+        incoming.map(
+          p => String(p.id)
+        )
+      );
+
+
+    Object.keys(
+      players
+    ).forEach(id => {
+
+      if (
+        !incomingIds.has(
+          String(id)
+        )
+      ) {
+
+        delete players[id];
+      }
+    });
+
+
+    incoming.forEach(
+      updatePlayer
     );
 
-    ws.onopen = () => {
 
-      setStatus(
-        "JOINING ROOM..."
+    updatePlayerList();
+
+    updateHUD();
+  }
+
+
+  function updatePlayer(data) {
+
+    if (
+      !data ||
+      data.id == null
+    ) {
+
+      return;
+    }
+
+
+    const id =
+      String(data.id);
+
+
+    const existing =
+      players[id];
+
+
+    if (!existing) {
+
+      players[id] = {
+
+        id,
+
+        name:
+          data.name ||
+          "PLAYER",
+
+        x:
+          Number(data.x) || 0,
+
+        y:
+          Number(data.y) || 0,
+
+        targetX:
+          Number(data.x) || 0,
+
+        targetY:
+          Number(data.y) || 0,
+
+        angle:
+          Number(data.angle) || 0,
+
+        targetAngle:
+          Number(data.angle) || 0,
+
+        hp:
+          Number(data.hp) || 100,
+
+        maxHp:
+          Number(data.maxHp) || 100,
+
+        class:
+          data.class ||
+          "assaulter",
+
+        alive:
+          data.alive !== false,
+
+        aux:
+          Number(data.aux) || 0,
+
+        reloadLevel:
+          Number(data.reloadLevel) || 0,
+
+        fireLevel:
+          Number(data.fireLevel) || 0,
+
+        moveLevel:
+          Number(data.moveLevel) || 0,
+
+        reloading:
+          !!data.reloading,
+
+        deathShown:
+          false
+      };
+
+
+      return;
+    }
+
+
+    existing.name =
+      data.name ||
+      existing.name;
+
+
+    existing.targetX =
+      Number.isFinite(
+        Number(data.x)
+      )
+        ? Number(data.x)
+        : existing.targetX;
+
+
+    existing.targetY =
+      Number.isFinite(
+        Number(data.y)
+      )
+        ? Number(data.y)
+        : existing.targetY;
+
+
+    existing.targetAngle =
+      Number.isFinite(
+        Number(data.angle)
+      )
+        ? Number(data.angle)
+        : existing.targetAngle;
+
+
+    existing.hp =
+      Number.isFinite(
+        Number(data.hp)
+      )
+        ? Number(data.hp)
+        : existing.hp;
+
+
+    existing.maxHp =
+      Number.isFinite(
+        Number(data.maxHp)
+      )
+        ? Number(data.maxHp)
+        : existing.maxHp;
+
+
+    existing.class =
+      data.class ||
+      existing.class;
+
+
+    existing.alive =
+      data.alive !== false;
+
+
+    existing.aux =
+      Number.isFinite(
+        Number(data.aux)
+      )
+        ? Number(data.aux)
+        : existing.aux;
+
+
+    existing.reloadLevel =
+      Number(
+        data.reloadLevel ??
+        existing.reloadLevel ??
+        0
       );
 
-      ws.send(
-        JSON.stringify({
-          type:"join_room",
-          key
-        })
+
+    existing.fireLevel =
+      Number(
+        data.fireLevel ??
+        existing.fireLevel ??
+        0
       );
-    };
 
-    ws.onmessage = event => {
 
-      let message;
+    existing.moveLevel =
+      Number(
+        data.moveLevel ??
+        existing.moveLevel ??
+        0
+      );
 
-      try {
 
-        message =
-          JSON.parse(event.data);
+    existing.reloading =
+      !!data.reloading;
+  }
 
-      } catch {
 
-        return;
-      }
+  function clearPlayers() {
 
-      if (
-        message.type ===
-        "joined"
-      ) {
+    Object.keys(
+      players
+    ).forEach(
+      id => delete players[id]
+    );
 
-        connected = true;
 
-        myId =
-          message.player_id;
+    projectiles = [];
 
-        currentRoom =
-          message.room ||
-          key;
+    updatePlayerList();
 
-        roomKey.textContent =
-          currentRoom;
+    updateHUD();
+  }
 
-        showGameUI();
 
-        setStatus(
-          message.is_host
-            ? "CONNECTED HOST"
-            : "CONNECTED"
-        );
+  /* =========================================================
+     PLAYER LIST
+  ========================================================= */
 
-        return;
-      }
+  function updatePlayerList() {
 
-      if (
-        message.type ===
-        "state"
-      ) {
+    const list =
+      Object.values(
+        players
+      );
 
-        const incoming =
-          message.players ||
-          [];
 
-        const incomingIds =
-          new Set(
-            incoming.map(
-              p => String(p.id)
-            )
-          );
+    playerCount.textContent =
+      `PLAYERS: ${list.length} / ${MAX_PLAYERS}`;
 
-        Object.keys(players)
-          .forEach(id => {
 
-            if (
-              !incomingIds.has(
-                String(id)
-              )
-            ) {
-              delete players[id];
-            }
+    playersElement.innerHTML =
+      "";
 
-          });
 
-        incoming.forEach(
-          updatePlayer
-        );
+    list
+      .sort((a, b) => {
 
-        syncMyHud();
-        updatePlayerList();
-
-        return;
-      }
-
-      if (
-        message.type ===
-        "player_joined" &&
-        message.player
-      ) {
-
-        updatePlayer(
-          message.player
-        );
-
-        updatePlayerList();
-
-        return;
-      }
-
-      if (
-        message.type ===
-        "player_input"
-      ) {
-
-        const player =
-          players[
-            message.player_id
-          ];
-
-        if (!player)
-          return;
-
-        if (
-          Number.isFinite(
-            message.x
-          )
-        )
-          player.targetX =
-            message.x;
-
-        if (
-          Number.isFinite(
-            message.y
-          )
-        )
-          player.targetY =
-            message.y;
-
-        if (
-          Number.isFinite(
-            message.angle
-          )
-        )
-          player.targetAngle =
-            message.angle;
-
-        if (message.class)
-          player.class =
-            message.class;
-
-        return;
-      }
-
-      /*
-       * Server will emit this after a successful kill.
-       */
-      if (
-        message.type ===
-        "hit" &&
-        message.killer_id === myId
-      ) {
-
-        const reward =
-          Number(
-            message.aux || 0
-          );
-
-        killAux.textContent =
-          reward;
-
-        setTimeout(
-          () => {
-            killAux.textContent =
-              "0";
-          },
-          900
-        );
-
-        return;
-      }
-
-      /*
-       * Server can send updated AUX/upgrades.
-       */
-      if (
-        message.type ===
-        "player_stats"
-      ) {
-
-        if (
-          message.player_id ===
-          myId
-        ) {
-
-          const me =
-            players[myId];
-
-          if (me) {
-
-            if (
-              Number.isFinite(
-                message.aux
-              )
-            )
-              me.aux =
-                message.aux;
-
-            if (
-              message.reloadLevel != null
-            )
-              me.reloadLevel =
-                Number(
-                  message.reloadLevel
-                );
-
-            if (
-              message.fireLevel != null
-            )
-              me.fireLevel =
-                Number(
-                  message.fireLevel
-                );
-
-            if (
-              message.moveLevel != null
-            )
-              me.moveLevel =
-                Number(
-                  message.moveLevel
-                );
-          }
-
-          syncMyHud();
+        if (a.id === myId) {
+          return -1;
         }
 
-        return;
-      }
+        if (b.id === myId) {
+          return 1;
+        }
 
-      if (
-        message.type ===
-        "error"
-      ) {
+        return String(
+          a.name
+        ).localeCompare(
+          String(b.name)
+        );
+      })
+      .forEach(
+        player => {
 
-        setStatus(
-          message.message ||
-          "ERROR"
+          const row =
+            document.createElement(
+              "div"
+            );
+
+
+          row.className =
+            "riot-player-row" +
+            (
+              player.id === myId
+                ? " you"
+                : ""
+            );
+
+
+          const name =
+            player.id === myId
+              ? "YOU"
+              : (
+                  player.name ||
+                  "PLAYER"
+                );
+
+
+          const cls =
+            (
+              player.class ||
+              "assaulter"
+            )
+              .toUpperCase();
+
+
+          row.innerHTML =
+            `
+              <span>
+                ${escapeHTML(name)}
+              </span>
+              <span class="riot-player-class">
+                ${escapeHTML(cls)}
+              </span>
+            `;
+
+
+          playersElement.appendChild(
+            row
+          );
+        }
+      );
+  }
+
+
+  /* =========================================================
+     HUD
+  ========================================================= */
+
+  function updateHUD() {
+
+    const me =
+      players[myId];
+
+
+    if (!me) {
+      return;
+    }
+
+
+    const cls =
+      CLASSES[
+        me.class
+      ] ||
+      CLASSES.assaulter;
+
+
+    classNameElement.textContent =
+      cls.label;
+
+
+    const hp =
+      clamp(
+        Number(me.hp) || 0,
+        0,
+        Number(me.maxHp) || 100
+      );
+
+
+    const maxHp =
+      Number(me.maxHp) || 100;
+
+
+    hpFill.style.width =
+      (
+        hp / maxHp * 100
+      ) + "%";
+
+
+    auxElement.textContent =
+      `AUX: ${Math.floor(
+        Number(me.aux) || 0
+      )}`;
+
+
+    reloadLevelElement.textContent =
+      `LV ${Number(
+        me.reloadLevel || 0
+      )}`;
+
+
+    fireLevelElement.textContent =
+      `LV ${Number(
+        me.fireLevel || 0
+      )}`;
+
+
+    moveLevelElement.textContent =
+      `LV ${Number(
+        me.moveLevel || 0
+      )}`;
+
+
+    selectedClass =
+      me.class ||
+      selectedClass;
+
+
+    updateClassButtons();
+  }
+
+
+  function updateClassButtons() {
+
+    root
+      .querySelectorAll(
+        ".riot-class-button"
+      )
+      .forEach(
+        button => {
+
+          button.classList.toggle(
+            "active",
+
+            button.dataset.class ===
+              selectedClass
+          );
+        }
+      );
+  }
+
+
+  /* =========================================================
+     CLASS SWITCH
+  ========================================================= */
+
+  function chooseClass(className) {
+
+    if (
+      !CLASSES[className]
+    ) {
+
+      return;
+    }
+
+
+    selectedClass =
+      className;
+
+
+    updateClassButtons();
+
+
+    send({
+
+      type:
+        "input",
+
+      input: {
+
+        w: !!keys.w,
+
+        a: !!keys.a,
+
+        s: !!keys.s,
+
+        d: !!keys.d,
+
+        shooting: false
+      },
+
+      angle:
+        getAimAngle(),
+
+      class:
+        selectedClass
+    });
+  }
+
+
+  /* =========================================================
+     UPGRADES
+  ========================================================= */
+
+  function buyUpgrade(upgrade) {
+
+    if (!connected) {
+      return;
+    }
+
+
+    send({
+
+      type:
+        "upgrade",
+
+      upgrade
+    });
+  }
+
+
+  /* =========================================================
+     CAMERA
+  ========================================================= */
+
+  function updateCamera() {
+
+    const me =
+      players[myId];
+
+
+    if (!me) {
+
+      cameraX =
+        lerp(
+          cameraX,
+          WORLD_WIDTH / 2,
+          .08
         );
 
-        return;
-      }
+      cameraY =
+        lerp(
+          cameraY,
+          WORLD_HEIGHT / 2,
+          .08
+        );
 
-      if (
-        message.type ===
-        "player_left"
-      ) {
+      return;
+    }
 
-        delete players[
-          message.player_id
-        ];
 
-        updatePlayerList();
-
-      }
-    };
-
-    ws.onerror = () => {
-
-      setStatus(
-        "SERVER ERROR"
+    cameraX =
+      lerp(
+        cameraX,
+        Number(me.x) || 0,
+        .18
       );
-    };
 
-    ws.onclose = () => {
 
-      connected = false;
-      myId = null;
-      currentRoom = null;
-
-      resetConnectionUI();
-
-      setStatus(
-        "DISCONNECTED"
+    cameraY =
+      lerp(
+        cameraY,
+        Number(me.y) || 0,
+        .18
       );
+
+
+    /*
+      Keep camera inside world.
+    */
+
+    const halfW =
+      W / 2;
+
+    const halfH =
+      H / 2;
+
+
+    cameraX =
+      clamp(
+        cameraX,
+        halfW,
+        WORLD_WIDTH - halfW
+      );
+
+
+    cameraY =
+      clamp(
+        cameraY,
+        halfH,
+        WORLD_HEIGHT - halfH
+      );
+  }
+
+
+  function worldToScreen(x, y) {
+
+    return {
+
+      x:
+        x -
+        cameraX +
+        W / 2,
+
+      y:
+        y -
+        cameraY +
+        H / 2
     };
   }
+
+
+  function screenToWorld(x, y) {
+
+    return {
+
+      x:
+        x -
+        W / 2 +
+        cameraX,
+
+      y:
+        y -
+        H / 2 +
+        cameraY
+    };
+  }
+
+
+  /* =========================================================
+     AIM
+  ========================================================= */
+
+  function getAimAngle() {
+
+    const me =
+      players[myId];
+
+
+    if (!me) {
+      return 0;
+    }
+
+
+    const screen =
+      worldToScreen(
+        me.x,
+        me.y
+      );
+
+
+    return Math.atan2(
+      mouseY -
+        screen.y,
+
+      mouseX -
+        screen.x
+    );
+  }
+
+
+  /* =========================================================
+     INPUT
+  ========================================================= */
 
   function sendInput() {
 
@@ -1251,175 +1880,162 @@
       !ws ||
       ws.readyState !==
         WebSocket.OPEN ||
-      myId == null
-    )
+      !myId
+    ) {
+
       return;
+    }
+
 
     const me =
       players[myId];
 
-    if (!me)
+
+    if (!me) {
       return;
-
-    let dx =
-      (keys.d ? 1 : 0) -
-      (keys.a ? 1 : 0);
-
-    let dy =
-      (keys.s ? 1 : 0) -
-      (keys.w ? 1 : 0);
-
-    if (dx || dy) {
-
-      const length =
-        Math.hypot(dx,dy);
-
-      dx /= length;
-      dy /= length;
-
-      /*
-       * Slightly faster movement.
-       *
-       * Worker.js must enforce the authoritative
-       * movement speed next.
-       */
-      const speed =
-        4.25 +
-        localProgress.move * 0.25;
-
-      me.x +=
-        dx * speed;
-
-      me.y +=
-        dy * speed;
-
-      me.x =
-        Math.max(
-          22,
-          Math.min(
-            W - 22,
-            me.x
-          )
-        );
-
-      me.y =
-        Math.max(
-          82,
-          Math.min(
-            H - 22,
-            me.y
-          )
-        );
-
-      me.targetX =
-        me.x;
-
-      me.targetY =
-        me.y;
     }
 
-    me.angle =
-      Math.atan2(
-        mouseY - me.y,
-        mouseX - me.x
-      );
 
-    me.targetAngle =
-      me.angle;
+    /*
+      Assaulter:
+        holding click stays true.
 
-    try {
+      Sniper/RPG/Shotgun:
+        only send a single true pulse
+        when mouse is first pressed.
+    */
 
-      ws.send(
-        JSON.stringify({
+    const shooting =
+      me.class ===
+        "assaulter"
+        ? mouseDown
+        : pulseShot;
 
-          type:"input",
 
-          input:{
-            w:!!keys.w,
-            a:!!keys.a,
-            s:!!keys.s,
-            d:!!keys.d,
-            shooting:mouseDown
-          },
+    send({
 
-          x:me.x,
-          y:me.y,
+      type:
+        "input",
 
-          angle:
-            me.angle,
+      input: {
 
-          class:
-            me.class
+        w: !!keys.w,
 
-        })
-      );
+        a: !!keys.a,
 
-    } catch {
+        s: !!keys.s,
 
-      setStatus(
-        "SEND FAILED"
-      );
-    }
+        d: !!keys.d,
+
+        shooting
+      },
+
+      angle:
+        getAimAngle(),
+
+      class:
+        me.class ||
+        selectedClass
+    });
+
+
+    pulseShot =
+      false;
+
+
+    lastMouseDown =
+      mouseDown;
   }
 
-  function lerpAngle(
-    from,
-    to,
-    amount
-  ) {
 
-    let diff =
-      (
-        to -
-        from +
-        Math.PI
-      ) %
-      (Math.PI * 2) -
-      Math.PI;
-
-    return (
-      from +
-      diff * amount
-    );
-  }
+  /* =========================================================
+     SMOOTH PLAYERS
+  ========================================================= */
 
   function updatePlayers() {
 
-    Object.values(players)
-      .forEach(player => {
+    Object.values(
+      players
+    ).forEach(
+      player => {
+
+        /*
+          Local player position is
+          server-authoritative.
+
+          Smooth only the camera.
+        */
 
         if (
-          player.id ===
-          myId
-        )
-          return;
+          player.id !== myId
+        ) {
 
-        player.x +=
-          (
-            player.targetX -
-            player.x
-          ) * 0.22;
+          player.x =
+            lerp(
+              player.x,
+              player.targetX,
+              .24
+            );
 
-        player.y +=
-          (
-            player.targetY -
-            player.y
-          ) * 0.22;
 
-        player.angle =
-          lerpAngle(
-            player.angle,
-            player.targetAngle,
-            0.22
-          );
+          player.y =
+            lerp(
+              player.y,
+              player.targetY,
+              .24
+            );
 
-      });
+
+          player.angle =
+            lerpAngle(
+              player.angle,
+              player.targetAngle,
+              .24
+            );
+
+        } else {
+
+          /*
+            Small interpolation for
+            local rendering.
+          */
+
+          player.x =
+            lerp(
+              player.x,
+              player.targetX,
+              .18
+            );
+
+
+          player.y =
+            lerp(
+              player.y,
+              player.targetY,
+              .18
+            );
+
+
+          player.angle =
+            lerpAngle(
+              player.angle,
+              player.targetAngle,
+              .18
+            );
+        }
+      }
+    );
   }
 
-  function drawMap() {
+
+  /* =========================================================
+     DRAW BACKGROUND
+  ========================================================= */
+
+  function drawBackground() {
 
     ctx.fillStyle =
-      "#0b0e14";
+      "#080a0f";
 
     ctx.fillRect(
       0,
@@ -1428,150 +2044,403 @@
       H
     );
 
+
     /*
-     * Subtle map grid.
-     */
+      Grid.
+    */
+
+    const grid =
+      100;
+
+
+    const startX =
+      -(
+        (
+          cameraX -
+          W / 2
+        ) %
+        grid
+      );
+
+
+    const startY =
+      -(
+        (
+          cameraY -
+          H / 2
+        ) %
+        grid
+      );
+
+
     ctx.strokeStyle =
       "rgba(255,255,255,.035)";
 
-    ctx.lineWidth = 1;
+    ctx.lineWidth =
+      1;
+
 
     for (
-      let x = 0;
+      let x = startX;
       x < W;
-      x += 40
+      x += grid
     ) {
 
       ctx.beginPath();
 
       ctx.moveTo(
-        x,
-        70
+        Math.round(x) + .5,
+        0
       );
 
       ctx.lineTo(
-        x,
+        Math.round(x) + .5,
         H
       );
 
       ctx.stroke();
     }
 
+
     for (
-      let y = 70;
+      let y = startY;
       y < H;
-      y += 40
+      y += grid
     ) {
 
       ctx.beginPath();
 
       ctx.moveTo(
         0,
-        y
+        Math.round(y) + .5
       );
 
       ctx.lineTo(
         W,
-        y
+        Math.round(y) + .5
       );
 
       ctx.stroke();
     }
 
+
     /*
-     * Random blocks with AUX text.
-     */
-    obstacles.forEach(o => {
+      World border.
+    */
+
+    const topLeft =
+      worldToScreen(
+        0,
+        0
+      );
+
+
+    ctx.strokeStyle =
+      "rgba(255,73,101,.25)";
+
+    ctx.lineWidth =
+      2;
+
+    ctx.strokeRect(
+      topLeft.x,
+      topLeft.y,
+      WORLD_WIDTH,
+      WORLD_HEIGHT
+    );
+  }
+
+
+  /* =========================================================
+     DRAW OBSTACLES
+  ========================================================= */
+
+  function drawObstacles() {
+
+    for (
+      const obstacle
+      of currentMap
+    ) {
+
+      if (!obstacle) {
+        continue;
+      }
+
+
+      const p =
+        worldToScreen(
+          Number(obstacle.x) || 0,
+          Number(obstacle.y) || 0
+        );
+
+
+      const w =
+        Number(obstacle.w) || 0;
+
+      const h =
+        Number(obstacle.h) || 0;
+
+
+      /*
+        Skip objects completely
+        outside the viewport.
+      */
+
+      if (
+        p.x + w < 0 ||
+        p.x > W ||
+        p.y + h < 0 ||
+        p.y > H
+      ) {
+
+        continue;
+      }
+
+
+      /*
+        Block.
+      */
 
       ctx.fillStyle =
-        "rgba(45,50,62,.94)";
+        "rgba(25,29,39,.96)";
 
       ctx.fillRect(
-        o.x,
-        o.y,
-        o.w,
-        o.h
+        p.x,
+        p.y,
+        w,
+        h
       );
+
 
       ctx.strokeStyle =
-        "rgba(255,255,255,.10)";
+        "rgba(255,255,255,.13)";
+
+      ctx.lineWidth =
+        1;
 
       ctx.strokeRect(
-        o.x,
-        o.y,
-        o.w,
-        o.h
+        p.x + .5,
+        p.y + .5,
+        w - 1,
+        h - 1
       );
 
+
+      /*
+        AUX text inside obstacle.
+      */
+
+      ctx.save();
+
+      ctx.globalAlpha =
+        .24;
+
+      ctx.fillStyle =
+        "#ffd45a";
+
       ctx.font =
-        "bold 9px Arial";
+        "900 12px Arial";
 
       ctx.textAlign =
         "center";
 
-      ctx.fillStyle =
-        "rgba(255,255,255,.23)";
+      ctx.textBaseline =
+        "middle";
+
+
+      const label =
+        obstacle.label ||
+        "AUX";
+
 
       ctx.fillText(
-        "AUX",
-        o.x + o.w / 2,
-        o.y + o.h / 2 + 3
+        label,
+        p.x + w / 2,
+        p.y + h / 2
       );
-    });
+
+
+      ctx.restore();
+    }
   }
+
+
+  /* =========================================================
+     DRAW RPG MISSILES
+  ========================================================= */
+
+  function drawProjectiles() {
+
+    projectiles.forEach(
+      projectile => {
+
+        if (
+          projectile.type !==
+          "rpg"
+        ) {
+
+          return;
+        }
+
+
+        const p =
+          worldToScreen(
+            Number(projectile.x) || 0,
+            Number(projectile.y) || 0
+          );
+
+
+        ctx.save();
+
+        ctx.translate(
+          p.x,
+          p.y
+        );
+
+
+        ctx.rotate(
+          Number(projectile.angle) || 0
+        );
+
+
+        /*
+          Smoke/trail.
+        */
+
+        ctx.fillStyle =
+          "rgba(255,150,80,.22)";
+
+        ctx.beginPath();
+
+        ctx.arc(
+          -9,
+          0,
+          6,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.fill();
+
+
+        /*
+          Missile body.
+        */
+
+        ctx.fillStyle =
+          "#d6d6d6";
+
+        ctx.fillRect(
+          -5,
+          -2,
+          16,
+          4
+        );
+
+
+        ctx.fillStyle =
+          "#f39b70";
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+          13,
+          0
+        );
+
+        ctx.lineTo(
+          5,
+          -4
+        );
+
+        ctx.lineTo(
+          5,
+          4
+        );
+
+        ctx.closePath();
+
+        ctx.fill();
+
+
+        ctx.restore();
+      }
+    );
+  }
+
+
+  /* =========================================================
+     DRAW PLAYER
+  ========================================================= */
 
   function drawPlayer(
     player,
     index
   ) {
 
-    if (!player)
+    if (!player) {
       return;
+    }
 
-    const x =
-      Number.isFinite(player.x)
-        ? player.x
-        : W / 2;
 
-    const y =
-      Number.isFinite(player.y)
-        ? player.y
-        : H / 2;
+    const p =
+      worldToScreen(
+        Number(player.x) || 0,
+        Number(player.y) || 0
+      );
 
-    const angle =
-      Number.isFinite(player.angle)
-        ? player.angle
-        : 0;
 
-    const bodyColor =
-      palette[
-        index %
-        palette.length
-      ];
+    /*
+      Don't draw far outside
+      viewport.
+    */
+
+    if (
+      p.x < -100 ||
+      p.x > W + 100 ||
+      p.y < -100 ||
+      p.y > H + 100
+    ) {
+
+      return;
+    }
+
+
+    const cls =
+      CLASSES[
+        player.class
+      ] ||
+      CLASSES.assaulter;
+
+
+    const color =
+      cls.color;
+
 
     ctx.save();
 
     ctx.translate(
-      x,
-      y
+      p.x,
+      p.y
     );
 
     ctx.rotate(
-      angle
+      Number(player.angle) || 0
     );
 
+
     /*
-     * Shadow.
-     */
+      Shadow.
+    */
+
     ctx.fillStyle =
-      "rgba(0,0,0,.32)";
+      "rgba(0,0,0,.42)";
 
     ctx.beginPath();
 
     ctx.ellipse(
       0,
-      11,
-      14,
+      13,
+      16,
       7,
       0,
       0,
@@ -1580,115 +2449,190 @@
 
     ctx.fill();
 
-    /*
-     * Soldier body.
-     */
-    ctx.fillStyle =
-      bodyColor;
-
-    ctx.fillRect(
-      -10,
-      -13,
-      20,
-      26
-    );
 
     /*
-     * Weapon barrel length changes visually by class.
-     */
-    ctx.fillStyle =
-      "#202126";
-
-    let barrel =
-      23;
+      Dead player.
+    */
 
     if (
-      player.class ===
-      "sniper"
-    )
-      barrel = 32;
+      player.alive === false
+    ) {
+
+      ctx.globalAlpha =
+        .28;
+    }
+
+
+    /*
+      Body.
+    */
+
+    ctx.fillStyle =
+      color;
+
+    ctx.beginPath();
+
+    ctx.roundRect(
+      -11,
+      -13,
+      22,
+      26,
+      4
+    );
+
+    ctx.fill();
+
+
+    /*
+      Head.
+    */
+
+    ctx.fillStyle =
+      "#d7b29a";
+
+    ctx.beginPath();
+
+    ctx.arc(
+      7,
+      0,
+      6,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+
+    /*
+      Weapon.
+    */
+
+    ctx.fillStyle =
+      "#252932";
+
+    const weaponLength =
+      player.class === "sniper"
+        ? 34
+        : player.class === "rpg"
+          ? 30
+          : 25;
+
+
+    ctx.fillRect(
+      7,
+      -2,
+      weaponLength,
+      4
+    );
+
+
+    /*
+      RPG launcher shape.
+    */
 
     if (
       player.class ===
       "rpg"
-    )
-      barrel = 28;
+    ) {
+
+      ctx.fillStyle =
+        "#343943";
+
+      ctx.fillRect(
+        4,
+        -5,
+        24,
+        10
+      );
+    }
+
+
+    /*
+      Shotgun double barrel.
+    */
 
     if (
       player.class ===
       "shotgun"
-    )
-      barrel = 24;
-
-    ctx.fillRect(
-      4,
-      -3,
-      barrel,
-      5
-    );
-
-    /*
-     * Dead player.
-     */
-    if (!player.alive) {
-
-      ctx.globalAlpha =
-        0.35;
+    ) {
 
       ctx.fillStyle =
-        "#000";
+        "#22252b";
 
       ctx.fillRect(
-        -12,
-        -15,
+        6,
+        -5,
         24,
-        30
+        2
+      );
+
+      ctx.fillRect(
+        6,
+        3,
+        24,
+        2
       );
     }
 
+
     ctx.restore();
 
+
     /*
-     * HP bar.
-     */
+      Health bar.
+    */
+
     const hp =
-      Math.max(
+      clamp(
+        (
+          Number(player.hp) || 0
+        ) /
+        (
+          Number(player.maxHp) ||
+          100
+        ),
         0,
-        Math.min(
-          1,
-          (player.hp ?? 100) /
-          (player.maxHp || 100)
-        )
+        1
       );
 
-    ctx.fillStyle =
-      "rgba(0,0,0,.7)";
-
-    ctx.fillRect(
-      x - 20,
-      y - 28,
-      40,
-      3
-    );
 
     ctx.fillStyle =
-      bodyColor;
+      "rgba(0,0,0,.75)";
 
     ctx.fillRect(
-      x - 20,
-      y - 28,
-      40 * hp,
-      3
+      p.x - 22,
+      p.y - 30,
+      44,
+      4
     );
+
+
+    ctx.fillStyle =
+      color;
+
+    ctx.fillRect(
+      p.x - 22,
+      p.y - 30,
+      44 * hp,
+      4
+    );
+
+
+    /*
+      Name.
+    */
 
     ctx.font =
-      "9px Arial";
+      "900 9px Arial";
 
     ctx.textAlign =
       "center";
 
     ctx.fillStyle =
-      "rgba(255,255,255,.88)";
+      player.id === myId
+        ? "#65e0a2"
+        : "rgba(255,255,255,.82)";
+
 
     ctx.fillText(
       player.id === myId
@@ -1697,30 +2641,106 @@
             player.name ||
             "PLAYER"
           ),
-      x,
-      y + 25
+      p.x,
+      p.y + 27
     );
 
+
+    /*
+      Class marker.
+    */
+
     ctx.font =
-      "8px Arial";
+      "7px Arial";
 
     ctx.fillStyle =
-      "rgba(255,255,255,.55)";
+      "rgba(255,255,255,.42)";
+
 
     ctx.fillText(
-      String(
+      (
         player.class ||
         "assaulter"
       ).toUpperCase(),
-      x,
-      y + 35
+      p.x,
+      p.y + 38
     );
+
+
+    /*
+      Local player aim line.
+    */
+
+    if (
+      player.id === myId &&
+      player.alive !== false
+    ) {
+
+      ctx.save();
+
+      ctx.strokeStyle =
+        "rgba(255,255,255,.08)";
+
+      ctx.lineWidth =
+        1;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        p.x,
+        p.y
+      );
+
+      ctx.lineTo(
+        p.x +
+          Math.cos(player.angle) *
+          65,
+
+        p.y +
+          Math.sin(player.angle) *
+          65
+      );
+
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+
+    /*
+      Reload indicator.
+    */
+
+    if (
+      player.id === myId &&
+      player.reloading
+    ) {
+
+      ctx.font =
+        "900 8px Arial";
+
+      ctx.fillStyle =
+        "#ffd45a";
+
+      ctx.fillText(
+        "RELOADING...",
+        p.x,
+        p.y - 39
+      );
+    }
   }
+
+
+  /* =========================================================
+     DRAW GAME
+  ========================================================= */
 
   function draw() {
 
-    if (destroyed)
+    if (destroyed) {
       return;
+    }
+
 
     ctx.clearRect(
       0,
@@ -1729,24 +2749,44 @@
       H
     );
 
-    drawMap();
 
     updatePlayers();
 
+    updateCamera();
+
+    drawBackground();
+
+    drawObstacles();
+
+    drawProjectiles();
+
+
+    const list =
+      Object.values(
+        players
+      );
+
+
+    list.forEach(
+      (player, index) => {
+
+        drawPlayer(
+          player,
+          index
+        );
+      }
+    );
+
+
+    /*
+      Crosshair.
+    */
+
     if (connected) {
 
-      Object.values(players)
-        .forEach(
-          (player,index) => {
-
-            drawPlayer(
-              player,
-              index
-            );
-
-          }
-        );
+      drawCrosshair();
     }
+
 
     animationId =
       requestAnimationFrame(
@@ -1754,94 +2794,252 @@
       );
   }
 
+
+  /* =========================================================
+     CROSSHAIR
+  ========================================================= */
+
+  function drawCrosshair() {
+
+    const size =
+      7;
+
+
+    ctx.save();
+
+    ctx.strokeStyle =
+      "rgba(255,255,255,.7)";
+
+    ctx.lineWidth =
+      1;
+
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      mouseX - size,
+      mouseY
+    );
+
+    ctx.lineTo(
+      mouseX - 2,
+      mouseY
+    );
+
+
+    ctx.moveTo(
+      mouseX + 2,
+      mouseY
+    );
+
+    ctx.lineTo(
+      mouseX + size,
+      mouseY
+    );
+
+
+    ctx.moveTo(
+      mouseX,
+      mouseY - size
+    );
+
+    ctx.lineTo(
+      mouseX,
+      mouseY - 2
+    );
+
+
+    ctx.moveTo(
+      mouseX,
+      mouseY + 2
+    );
+
+    ctx.lineTo(
+      mouseX,
+      mouseY + size
+    );
+
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+
+  /* =========================================================
+     KILL FEED
+  ========================================================= */
+
+  function addFeed(text) {
+
+    const item =
+      document.createElement(
+        "div"
+      );
+
+
+    item.className =
+      "riot-feed";
+
+
+    item.textContent =
+      text;
+
+
+    killFeed.appendChild(
+      item
+    );
+
+
+    window.setTimeout(
+      () => item.remove(),
+      2600
+    );
+
+
+    /*
+      Prevent the feed from growing.
+    */
+
+    while (
+      killFeed.children.length >
+      5
+    ) {
+
+      killFeed.firstChild.remove();
+    }
+  }
+
+
+  /* =========================================================
+     LEAVE
+  ========================================================= */
+
   function leave() {
+
+    mouseDown =
+      false;
+
+    pulseShot =
+      false;
+
+    connected =
+      false;
+
+    myId =
+      null;
+
+    currentRoom =
+      null;
 
     closeSocket();
 
-    connected = false;
-    myId = null;
-    currentRoom = null;
-    mouseDown = false;
-
     clearPlayers();
 
-    resetConnectionUI();
+
+    roomBox.style.display =
+      "none";
+
+    playerList.style.display =
+      "none";
+
+    classPanel.style.display =
+      "none";
+
+    upgradePanel.style.display =
+      "none";
+
+
+    help.style.display =
+      "block";
+
 
     setStatus(
       "OFFLINE"
     );
   }
 
-  /*
-   * Keyboard controls.
-   *
-   * IMPORTANT:
-   * Do not steal letters/numbers while typing
-   * inside the room key or server field.
-   */
+
+  /* =========================================================
+     KEYBOARD
+  ========================================================= */
+
   function onKeyDown(event) {
 
+    /*
+      Don't steal letters/numbers
+      while typing the room key.
+    */
+
     if (
-      document.activeElement ===
+      event.target ===
         keyInput ||
-      document.activeElement ===
+      event.target ===
         serverInput
     ) {
+
       return;
     }
+
 
     const key =
       event.key.toLowerCase();
 
-    /*
-     * Soldier class hotkeys.
-     */
-    if (
-      key === "1" ||
-      key === "2" ||
-      key === "3" ||
-      key === "4"
-    ) {
-
-      const index =
-        Number(key) - 1;
-
-      classSelect.selectedIndex =
-        index;
-
-      classSelect.dispatchEvent(
-        new Event("change")
-      );
-
-      return;
-    }
-
-    keys[key] = true;
 
     if (
-      ["w","a","s","d"," "]
-        .includes(key)
+      [
+        "w",
+        "a",
+        "s",
+        "d"
+      ].includes(key)
     ) {
+
+      keys[key] =
+        true;
 
       event.preventDefault();
     }
   }
 
+
   function onKeyUp(event) {
 
     if (
-      document.activeElement ===
+      event.target ===
         keyInput ||
-      document.activeElement ===
+      event.target ===
         serverInput
     ) {
+
       return;
     }
 
-    keys[
-      event.key.toLowerCase()
-    ] = false;
+
+    const key =
+      event.key.toLowerCase();
+
+
+    if (
+      [
+        "w",
+        "a",
+        "s",
+        "d"
+      ].includes(key)
+    ) {
+
+      keys[key] =
+        false;
+
+      event.preventDefault();
+    }
   }
+
+
+  /* =========================================================
+     MOUSE
+  ========================================================= */
 
   function onMouseMove(event) {
 
@@ -1852,50 +3050,110 @@
       event.clientY;
   }
 
+
   function onMouseDown(event) {
 
-    if (
-      !connected ||
-      event.button !== 0
-    )
-      return;
-
     /*
-     * UI controls must still receive clicks.
-     * Only the game area fires.
-     */
+      Never let the game background
+      steal a click from UI controls.
+    */
+
     if (
       event.target.closest(
-        "input,button,select"
-      )
-    )
-      return;
+        "#riot-soldier-controls"
+      ) ||
 
-    mouseDown = true;
+      event.target.closest(
+        "#riot-soldier-upgrades"
+      ) ||
+
+      event.target.closest(
+        "#riot-soldier-class-panel"
+      ) ||
+
+      event.target.closest(
+        "input"
+      ) ||
+
+      event.target.closest(
+        "button"
+      )
+    ) {
+
+      return;
+    }
+
+
+    if (
+      event.button !== 0
+    ) {
+
+      return;
+    }
+
+
+    if (!connected) {
+      return;
+    }
+
+
+    mouseDown =
+      true;
+
+
+    const me =
+      players[myId];
+
+
+    if (!me) {
+      return;
+    }
+
+
+    /*
+      Only Assaulter uses continuous
+      fire.
+
+      The other classes use a pulse,
+      giving one click = one shot.
+    */
+
+    if (
+      me.class !==
+      "assaulter"
+    ) {
+
+      pulseShot =
+        true;
+    }
   }
+
 
   function onMouseUp(event) {
 
     if (
       event.button === 0
-    )
-      mouseDown = false;
+    ) {
+
+      mouseDown =
+        false;
+
+      pulseShot =
+        false;
+    }
   }
 
-  /*
-   * FIX:
-   * Room key accepts ALL letters and numbers.
-   *
-   * We do NOT rebuild the input value on every keydown.
-   * This prevents dropped characters.
-   */
+
+  /* =========================================================
+     ROOM KEY INPUT
+  ========================================================= */
+
   function onKeyInput() {
 
-    const start =
-      keyInput.selectionStart;
-
-    const oldLength =
-      keyInput.value.length;
+    /*
+      IMPORTANT:
+      Letters AND numbers are allowed.
+    */
 
     keyInput.value =
       keyInput.value
@@ -1908,135 +3166,139 @@
           0,
           32
         );
+  }
 
-    const removed =
-      oldLength -
-      keyInput.value.length;
+
+  /* =========================================================
+     PREVENT BACKGROUND CLICK
+  ========================================================= */
+
+  function onContextMenu(event) {
 
     if (
-      removed > 0 &&
-      start != null
+      event.target ===
+      canvas
     ) {
 
-      const pos =
-        Math.max(
-          0,
-          start - removed
-        );
-
-      try {
-
-        keyInput.setSelectionRange(
-          pos,
-          pos
-        );
-
-      } catch {}
+      event.preventDefault();
     }
   }
 
-  /*
-   * Class selection.
-   */
-  classSelect.addEventListener(
-    "change",
-    () => {
 
-      const me =
-        players[myId];
+  /* =========================================================
+     CLASS BUTTONS
+  ========================================================= */
 
-      if (!me)
-        return;
+  root
+    .querySelectorAll(
+      ".riot-class-button"
+    )
+    .forEach(
+      button => {
 
-      me.class =
-        classSelect.value;
+        button.addEventListener(
+          "click",
+          event => {
 
-      classLabel.textContent =
-        classSelect.value
-          .toUpperCase();
-    }
-  );
+            event.stopPropagation();
 
-  /*
-   * Upgrade buttons.
-   *
-   * Worker.js will validate AUX and actually
-   * apply the upgrade.
-   */
-  root.querySelectorAll(
-    "[data-up]"
-  ).forEach(button => {
-
-    button.addEventListener(
-      "click",
-      () => {
-
-        if (
-          !connected ||
-          !ws ||
-          ws.readyState !==
-            WebSocket.OPEN
-        )
-          return;
-
-        const upgrade =
-          button.dataset.up;
-
-        const level =
-          Number(
-            localProgress[
-              upgrade
-            ] || 0
-          );
-
-        const cost =
-          10 +
-          level * 10;
-
-        if (
-          localProgress.aux <
-          cost
-        ) {
-
-          setStatus(
-            `NEED ${cost} AUX`
-          );
-
-          return;
-        }
-
-        ws.send(
-          JSON.stringify({
-
-            type:"upgrade",
-
-            upgrade
-
-          })
+            chooseClass(
+              button.dataset.class
+            );
+          }
         );
       }
     );
-  });
+
+
+  /* =========================================================
+     UPGRADE BUTTONS
+  ========================================================= */
+
+  root
+    .querySelectorAll(
+      ".riot-upgrade"
+    )
+    .forEach(
+      button => {
+
+        button.addEventListener(
+          "click",
+          event => {
+
+            event.stopPropagation();
+
+            buyUpgrade(
+              button.dataset.upgrade
+            );
+          }
+        );
+      }
+    );
+
+
+  /* =========================================================
+     ROOM BUTTONS
+  ========================================================= */
 
   joinButton.addEventListener(
     "click",
-    connect
+    event => {
+
+      event.stopPropagation();
+
+      connect();
+    }
   );
+
 
   leaveButton.addEventListener(
     "click",
-    leave
+    event => {
+
+      event.stopPropagation();
+
+      leave();
+    }
   );
+
 
   keyInput.addEventListener(
     "input",
     onKeyInput
   );
 
+
+  /*
+    Enter in room key joins.
+  */
+
+  keyInput.addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key ===
+        "Enter"
+      ) {
+
+        event.preventDefault();
+
+        connect();
+      }
+    }
+  );
+
+
+  /* =========================================================
+     WINDOW EVENTS
+  ========================================================= */
+
   window.addEventListener(
     "resize",
     resize
   );
+
 
   document.addEventListener(
     "keydown",
@@ -2044,57 +3306,81 @@
     true
   );
 
+
   document.addEventListener(
     "keyup",
     onKeyUp,
     true
   );
 
+
   document.addEventListener(
     "mousemove",
     onMouseMove
   );
+
 
   document.addEventListener(
     "mousedown",
     onMouseDown
   );
 
+
   document.addEventListener(
     "mouseup",
     onMouseUp
   );
 
-  resize();
+
+  document.addEventListener(
+    "contextmenu",
+    onContextMenu
+  );
+
+
+  /* =========================================================
+     INPUT LOOP
+  ========================================================= */
 
   inputTimer =
     window.setInterval(
       () => {
 
-        if (connected)
-          sendInput();
+        if (connected) {
 
+          sendInput();
+        }
       },
       50
     );
 
+
+  /* =========================================================
+     CLEANUP
+  ========================================================= */
+
   window.__riotSoldierCleanup =
     () => {
 
-      destroyed = true;
+      destroyed =
+        true;
+
 
       cancelAnimationFrame(
         animationId
       );
 
+
       clearInterval(
         inputTimer
       );
+
 
       window.removeEventListener(
         "resize",
         resize
       );
+
 
       document.removeEventListener(
         "keydown",
@@ -2102,26 +3388,37 @@
         true
       );
 
+
       document.removeEventListener(
         "keyup",
         onKeyUp,
         true
       );
 
+
       document.removeEventListener(
         "mousemove",
         onMouseMove
       );
+
 
       document.removeEventListener(
         "mousedown",
         onMouseDown
       );
 
+
       document.removeEventListener(
         "mouseup",
         onMouseUp
       );
+
+
+      document.removeEventListener(
+        "contextmenu",
+        onContextMenu
+      );
+
 
       closeSocket();
 
@@ -2130,9 +3427,28 @@
       delete window.__riotSoldierCleanup;
     };
 
+
+  /* =========================================================
+     START
+  ========================================================= */
+
+  resize();
+
+  updatePlayerList();
+
+  setStatus(
+    "OFFLINE"
+  );
+
+
   console.log(
-    "%cRIOT SOLDIER | UPDATED CLIENT",
-    "color:#e94560;font-weight:bold;font-size:14px"
+    "%cRIOT SOLDIER",
+    "color:#ff4965;font-weight:900;font-size:18px"
+  );
+
+  console.log(
+    "Client loaded. Server:",
+    serverInput.value
   );
 
   draw();
