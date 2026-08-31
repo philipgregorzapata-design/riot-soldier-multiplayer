@@ -528,10 +528,10 @@
    * world move naturally while staying inside the page border.
    */
   function worldViewport() {
-    const scale = Math.max(0.55, Math.min(1.0, Math.min(W / 1100, H / 700)));
+    const scale = Math.max(0.72, Math.min(1.15, Math.min(W / 1200, H / 800)));
     const me = myId ? players[myId] : null;
-    const camX = me && Number.isFinite(Number(me.x)) ? Number(me.x) : WORLD_WIDTH / 2;
-    const camY = me && Number.isFinite(Number(me.y)) ? Number(me.y) : WORLD_HEIGHT / 2;
+    const camX = me ? Number(me.x || WORLD_WIDTH / 2) : WORLD_WIDTH / 2;
+    const camY = me ? Number(me.y || WORLD_HEIGHT / 2) : WORLD_HEIGHT / 2;
 
     return {
       x: W / 2 - camX * scale,
@@ -810,7 +810,7 @@
         roomKeyInput.readOnly = true;
         setStatus(message.is_host ? "ONLINE HOST" : "ONLINE");
 
-        if (Array.isArray(message.map) && message.map.length) {
+        if (Array.isArray(message.map)) {
           worldMap = message.map;
         }
 
@@ -834,10 +834,31 @@
         const ids = new Set(incoming.map(p => String(p.id)));
 
         for (const id of Object.keys(players)) {
-          if (!ids.has(String(id)) && String(id) !== String(myId)) delete players[id];
+          // Never delete our local placeholder while we are waiting for the
+          // authoritative snapshot after class selection.
+          if (!ids.has(String(id)) && String(id) !== String(myId)) {
+            delete players[id];
+          }
         }
 
         incoming.forEach(updatePlayer);
+
+        // Some older Workers briefly omit the newly-selected player from the
+        // first snapshot. Keep a local representation until the next snapshot.
+        if (myId && selectedClass && !players[myId]) {
+          players[myId] = normalizePlayer({
+            id: myId,
+            name: "YOU",
+            x: WORLD_WIDTH / 2,
+            y: WORLD_HEIGHT / 2,
+            angle: 0,
+            hp: 100,
+            maxHp: 100,
+            class: selectedClass,
+            alive: true,
+            aux: myAux
+          });
+        }
 
         if (Array.isArray(message.projectiles)) {
           const next = message.projectiles;
@@ -850,7 +871,7 @@
           worldProjectiles = next;
         }
 
-        if (Array.isArray(message.map) && message.map.length) {
+        if (Array.isArray(message.map)) {
           worldMap = message.map;
         }
 
@@ -1012,24 +1033,29 @@
     selectedClass = className;
     classConfirmed = true;
 
-    // Immediately mirror the selection locally so the soldier is visible
-    // while the next authoritative server snapshot arrives.
-    if (!players[myId]) {
+    // Create an immediate local soldier so the game is visible even before
+    // the first authoritative server snapshot arrives.
+    if (myId && !players[myId]) {
       players[myId] = normalizePlayer({
-        id: myId, name: "YOU",
-        x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2,
-        angle: 0, hp: 100, maxHp: 100,
-        class: className, alive: true, aux: 0
+        id: myId,
+        name: "YOU",
+        x: WORLD_WIDTH / 2,
+        y: WORLD_HEIGHT / 2,
+        angle: 0,
+        hp: 100,
+        maxHp: 100,
+        class: className,
+        alive: true,
+        aux: myAux
       });
-    } else {
+    } else if (myId && players[myId]) {
       players[myId].class = className;
       players[myId].alive = true;
-      if (!Number.isFinite(players[myId].x)) players[myId].x = WORLD_WIDTH / 2;
-      if (!Number.isFinite(players[myId].y)) players[myId].y = WORLD_HEIGHT / 2;
     }
 
     classEl.classList.remove("rs-selecting");
     updateHud();
+    updatePlayerList();
 
     try {
       ws.send(JSON.stringify({
@@ -1074,26 +1100,40 @@
     }
   }
 
-  function ensureFallbackMap() {
-    if (Array.isArray(worldMap) && worldMap.length) return;
-    // Visual fallback only. The server map, when available, always replaces this.
-    const seed = 73129;
-    let n = seed;
-    const rand = () => { n = (n * 1664525 + 1013904223) >>> 0; return n / 4294967296; };
-    worldMap = [];
-    for (let i = 0; i < 24; i++) {
-      const w = 140 + rand() * 260;
-      const h = 90 + rand() * 180;
-      worldMap.push({
-        x: 180 + rand() * (WORLD_WIDTH - w - 360),
-        y: 180 + rand() * (WORLD_HEIGHT - h - 360),
-        w, h, label: "AUX"
-      });
+  function getRenderableMap() {
+    if (Array.isArray(worldMap) && worldMap.length) return worldMap;
+
+    // Visual fallback for rooms created by an older Worker that did not send
+    // its generated map. The server remains authoritative; this only prevents
+    // the game world from appearing blank.
+    const blocks = [];
+    const cols = 6;
+    const rows = 5;
+    const margin = 350;
+    const gapX = (WORLD_WIDTH - margin * 2) / cols;
+    const gapY = (WORLD_HEIGHT - margin * 2) / rows;
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if ((row === 2 && col === 2) || (row === 2 && col === 3)) continue;
+
+        const w = 220 + ((row * 37 + col * 53) % 130);
+        const h = 150 + ((row * 61 + col * 29) % 100);
+
+        blocks.push({
+          x: margin + col * gapX + 55,
+          y: margin + row * gapY + 70,
+          w,
+          h,
+          label: "AUX"
+        });
+      }
     }
+
+    return blocks;
   }
 
   function drawMap() {
-    ensureFallbackMap();
     const v = worldViewport();
 
     // The map fills the Riot page. Only the world boundary is clipped.
@@ -1103,11 +1143,11 @@
     ctx.clip();
 
     // Subtle world floor so the map remains visible over the Riot page.
-    ctx.fillStyle = "rgba(10,12,18,.055)";
+    ctx.fillStyle = "rgba(10,12,18,.12)";
     ctx.fillRect(0, 0, W, H);
 
     // Subtle grid that blends into the existing dashboard.
-    ctx.strokeStyle = "rgba(255,255,255,.045)";
+    ctx.strokeStyle = "rgba(255,255,255,.075)";
     ctx.lineWidth = 1;
 
     const grid = 250;
@@ -1128,8 +1168,8 @@
       ctx.stroke();
     }
 
-    // Random server-generated AUX blocks.
-    for (const ob of worldMap) {
+    // Server-generated AUX blocks, with a visual fallback for older rooms.
+    for (const ob of getRenderableMap()) {
       if (!ob) continue;
 
       const sx = v.x + Number(ob.x || 0) * v.scale;
@@ -1154,6 +1194,11 @@
         sy + sh / 2
       );
     }
+
+    // World boundary, so the camera has a clear playable area.
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(v.x, v.y, v.w, v.h);
 
     ctx.restore();
   }
@@ -1273,7 +1318,7 @@
     const pos = worldToScreen(p.x, p.y);
 
     // Keep soldiers readable at every viewport size.
-    const radius = Math.max(9, Math.min(18, 16 * worldViewport().scale));
+    const radius = Math.max(12, Math.min(20, 18 * Math.max(worldViewport().scale, 0.8)));
     const bodyColor =
       p.id === myId
         ? "#42b982"
@@ -1365,7 +1410,13 @@
       }
       drawVisualEffects();
 
-      Object.values(players).forEach(drawPlayer);
+      Object.values(players).forEach((player, index) => {
+        try {
+          drawPlayer(player, index);
+        } catch (err) {
+          console.warn("[RIOT SOLDIER] player render error", err);
+        }
+      });
     }
 
     animationId = requestAnimationFrame(draw);
