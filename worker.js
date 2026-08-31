@@ -4,86 +4,99 @@ const WORLD_WIDTH = 5000;
 const WORLD_HEIGHT = 5000;
 
 const PLAYER_RADIUS = 16;
-const TICK_RATE = 50;
-
-const AUX_PER_KILL = 10;
-
-const MAX_UPGRADE_LEVEL = 10;
-const UPGRADE_COST_BASE = 10;
-const UPGRADE_COST_STEP = 10;
-
-const MOVE_BASE_SPEED = 4.25;
-const MOVE_UPGRADE_SPEED = 0.25;
-
-const RPG_RADIUS = 150;
-const RPG_SELF_DAMAGE = 35;
-
-const SHOTGUN_SPREAD = 0.22;
+const TICK_RATE = 50; // 20 server ticks/sec
 
 const CLASSES = {
   assaulter: {
     damage: 25,
     range: 700,
-    fireRate: 120
+    fireRate: 120,
+    reload: 0,
+    pellets: 1
   },
 
   sniper: {
     damage: 100,
     range: 5000,
-    fireRate: 900
+    fireRate: 900,
+    reload: 0,
+    pellets: 1
   },
 
   rpg: {
     damage: 120,
     range: 1600,
-    fireRate: 2000
+    fireRate: 2000,
+    reload: 2000,
+    pellets: 1
   },
 
   shotgun: {
     damage: 24,
     range: 420,
     fireRate: 700,
+    reload: 0,
     pellets: 8
   }
 };
 
+const AUX_PER_KILL = 10;
+
+const UPGRADE_COST_BASE = 10;
+const UPGRADE_COST_STEP = 10;
+
+const MAX_UPGRADE_LEVEL = 10;
+
+const MOVE_BASE_SPEED = 4.25;
+const MOVE_UPGRADE_SPEED = 0.25;
+
+const ASSAULTER_MIN_DAMAGE_MULTIPLIER = 0.25;
+
+const RPG_RADIUS = 150;
+const RPG_SELF_DAMAGE = 35;
+
+const SHOTGUN_SPREAD = 0.22;
+
+const obstacles = [];
+
 
 /* =========================================================
-   WORKER ENTRY
-========================================================= */
+   CLOUDFLARE WORKER
+   ========================================================= */
 
 export default {
   async fetch(request, env) {
+
     const url = new URL(request.url);
 
     if (url.pathname === "/") {
       return new Response(
         "RIOT SOLDIER MULTIPLAYER SERVER ONLINE",
-        {
-          status: 200,
-          headers: {
-            "content-type": "text/plain"
-          }
-        }
+        { status: 200 }
       );
     }
 
     if (url.pathname !== "/ws") {
-      return new Response("Not found", {
-        status: 404
-      });
+      return new Response(
+        "Not found",
+        { status: 404 }
+      );
     }
 
     if (
-      request.headers.get("Upgrade")?.toLowerCase() !==
-      "websocket"
+      request.headers.get("Upgrade")
+        ?.toLowerCase() !== "websocket"
     ) {
-      return new Response("Expected WebSocket", {
-        status: 426
-      });
+      return new Response(
+        "Expected WebSocket",
+        { status: 426 }
+      );
     }
 
-    const id = env.RIOT_ROOM.idFromName("global-lobby");
+    const id =
+      env.RIOT_ROOM.idFromName(
+        "global-lobby"
+      );
 
     return env.RIOT_ROOM
       .get(id)
@@ -94,7 +107,7 @@ export default {
 
 /* =========================================================
    DURABLE OBJECT
-========================================================= */
+   ========================================================= */
 
 export class RiotRoom {
 
@@ -105,15 +118,16 @@ export class RiotRoom {
 
     this.rooms = new Map();
 
+    this.lastTick = Date.now();
+
     /*
-      Every server instance gets a randomly generated map.
-      Obstacles contain AUX text that the client can render.
-    */
+     * Keep one generated world for this Durable Object.
+     */
     this.world = this.generateWorld();
 
     /*
-      Keep the game loop alive.
-    */
+     * Server game loop.
+     */
     this.timer = setInterval(
       () => this.gameTick(),
       TICK_RATE
@@ -122,12 +136,13 @@ export class RiotRoom {
 
 
   /* =======================================================
-     WEBSOCKET CONNECTION
-  ======================================================= */
+     CONNECTION
+     ======================================================= */
 
   async fetch(request) {
 
-    const pair = new WebSocketPair();
+    const pair =
+      new WebSocketPair();
 
     const client = pair[0];
     const server = pair[1];
@@ -138,56 +153,63 @@ export class RiotRoom {
     let playerId = null;
     let cleanedUp = false;
 
-
     const cleanup = () => {
 
-      if (cleanedUp) {
+      if (cleanedUp)
         return;
-      }
 
       cleanedUp = true;
 
-      if (!roomKey || !playerId) {
+      if (
+        !roomKey ||
+        !playerId
+      )
         return;
-      }
 
-      const room = this.rooms.get(roomKey);
+      const room =
+        this.rooms.get(roomKey);
 
-      if (!room) {
+      if (!room)
         return;
-      }
 
-      room.players.delete(playerId);
-      room.sockets.delete(playerId);
+      room.players.delete(
+        playerId
+      );
 
+      room.sockets.delete(
+        playerId
+      );
 
-      /*
-        If host leaves, another player becomes host.
-      */
-
-      if (room.hostId === playerId) {
+      if (
+        room.hostId ===
+        playerId
+      ) {
 
         room.hostId =
-          room.players.keys().next().value ||
-          null;
+          room.players
+            .keys()
+            .next()
+            .value || null;
       }
 
+      if (
+        room.players.size === 0
+      ) {
 
-      /*
-        Delete empty rooms.
-      */
-
-      if (room.players.size === 0) {
-
-        this.rooms.delete(roomKey);
+        this.rooms.delete(
+          roomKey
+        );
 
       } else {
 
         this.broadcast(
           room,
           {
-            type: "player_left",
-            player_id: playerId
+            type:
+              "player_left",
+
+            player_id:
+              playerId
           }
         );
 
@@ -205,54 +227,62 @@ export class RiotRoom {
 
         try {
 
-          const msg = JSON.parse(event.data);
+          const msg =
+            JSON.parse(
+              event.data
+            );
 
-          const type = msg.type;
+          const type =
+            msg.type;
 
 
-          /* ================================================
+          /* =================================================
              JOIN ROOM
-          ================================================ */
+             ================================================= */
 
-          if (type === "join_room") {
+          if (
+            type ===
+            "join_room"
+          ) {
 
-            if (roomKey) {
+            if (roomKey)
               return;
-            }
 
-            /*
-              IMPORTANT:
-              Accept letters AND numbers.
-            */
-
-            const key = String(
-              msg.key || ""
-            )
-              .trim()
-              .toUpperCase()
-              .replace(/[^A-Z0-9-]/g, "")
-              .slice(0, 32);
-
+            const key =
+              String(
+                msg.key || ""
+              )
+                .trim()
+                .toUpperCase()
+                .replace(
+                  /[^A-Z0-9-]/g,
+                  ""
+                )
+                .slice(
+                  0,
+                  32
+                );
 
             if (!key) {
 
               return this.send(
                 server,
                 {
-                  type: "error",
-                  message: "ENTER ROOM KEY"
+                  type:
+                    "error",
+
+                  message:
+                    "ENTER ROOM KEY"
                 }
               );
             }
 
 
             let room =
-              this.rooms.get(key);
+              this.rooms.get(
+                key
+              );
 
-
-            /*
-              Create room if it does not exist.
-            */
 
             if (!room) {
 
@@ -260,13 +290,18 @@ export class RiotRoom {
 
                 key,
 
-                players: new Map(),
+                players:
+                  new Map(),
 
-                sockets: new Map(),
+                sockets:
+                  new Map(),
 
-                projectiles: [],
+                projectiles:
+                  [],
 
-                hostId: null
+                hostId:
+                  null
+
               };
 
               this.rooms.set(
@@ -276,10 +311,6 @@ export class RiotRoom {
             }
 
 
-            /*
-              Maximum 10 players.
-            */
-
             if (
               room.players.size >=
               MAX_PLAYERS
@@ -288,36 +319,40 @@ export class RiotRoom {
               return this.send(
                 server,
                 {
-                  type: "error",
-                  message: "ROOM FULL"
+                  type:
+                    "error",
+
+                  message:
+                    "ROOM FULL"
                 }
               );
             }
 
-
-            /*
-              Generate unique player ID.
-            */
 
             do {
 
               playerId =
                 crypto
                   .randomUUID()
-                  .replace(/-/g, "")
-                  .slice(0, 8);
+                  .replace(
+                    /-/g,
+                    ""
+                  )
+                  .slice(
+                    0,
+                    8
+                  );
 
             } while (
-              room.players.has(playerId)
+              room.players.has(
+                playerId
+              )
             );
 
 
-            roomKey = key;
+            roomKey =
+              key;
 
-
-            /*
-              First player becomes host.
-            */
 
             if (!room.hostId) {
 
@@ -326,64 +361,78 @@ export class RiotRoom {
             }
 
 
+            const playerNumber =
+              room.players.size + 1;
+
+
             const spawn =
-              this.findSpawn(room);
+              this.findSpawn(
+                room
+              );
 
 
             const player = {
 
-              id: playerId,
+              id:
+                playerId,
 
               name:
-                `PLAYER-${room.players.size + 1}`,
+                `PLAYER-${playerNumber}`,
 
-              x: spawn.x,
+              x:
+                spawn.x,
 
-              y: spawn.y,
+              y:
+                spawn.y,
 
-              angle: 0,
+              angle:
+                0,
 
-              hp: 100,
+              hp:
+                100,
 
-              maxHp: 100,
+              maxHp:
+                100,
 
-              class: "assaulter",
+              class:
+                "assaulter",
 
-              alive: true,
+              alive:
+                true,
 
-              aux: 0,
+              aux:
+                0,
 
+              reloadLevel:
+                0,
 
-              /*
-                Upgrade levels.
-              */
+              fireLevel:
+                0,
 
-              reloadLevel: 0,
+              moveLevel:
+                0,
 
-              fireLevel: 0,
-
-              moveLevel: 0,
-
-
-              shooting: false,
+              shooting:
+                false,
 
               input: {
 
                 w: false,
-
                 a: false,
-
                 s: false,
-
                 d: false
+
               },
 
+              lastShot:
+                0,
 
-              lastShot: 0,
+              reloadUntil:
+                0,
 
-              reloadUntil: 0,
+              respawnAt:
+                0
 
-              respawnAt: 0
             };
 
 
@@ -398,48 +447,47 @@ export class RiotRoom {
             );
 
 
-            /*
-              Tell client it joined successfully.
-            */
-
             this.send(
               server,
               {
 
-                type: "joined",
+                type:
+                  "joined",
 
-                room: key,
+                room:
+                  key,
 
-                player_id: playerId,
+                player_id:
+                  playerId,
 
                 is_host:
-                  playerId === room.hostId,
+                  playerId ===
+                  room.hostId,
 
                 max_players:
                   MAX_PLAYERS,
 
-                map: this.world
+                map:
+                  this.world
+
               }
             );
 
 
-            /*
-              Send complete state.
-            */
-
             this.broadcast(
               room,
-              this.snapshot(room)
+              this.snapshot(
+                room
+              )
             );
-
 
             return;
           }
 
 
-          /* ================================================
+          /* =================================================
              REQUIRE ROOM
-          ================================================ */
+             ================================================= */
 
           if (
             !roomKey ||
@@ -449,61 +497,84 @@ export class RiotRoom {
             return this.send(
               server,
               {
-                type: "error",
+
+                type:
+                  "error",
+
                 message:
                   "JOIN A ROOM FIRST"
+
               }
             );
           }
 
 
           const room =
-            this.rooms.get(roomKey);
+            this.rooms.get(
+              roomKey
+            );
 
           const player =
-            room?.players.get(playerId);
+            room?.players.get(
+              playerId
+            );
 
 
-          if (!room || !player) {
+          if (
+            !room ||
+            !player
+          )
             return;
-          }
 
 
-          /* ================================================
+          /* =================================================
              INPUT
-          ================================================ */
+             ================================================= */
 
-          if (type === "input") {
+          if (
+            type ===
+            "input"
+          ) {
 
-            return this.handleInput(
+            this.handleInput(
               room,
               player,
               msg
             );
+
+            return;
           }
 
 
-          /* ================================================
-             PLAYER NAME
-          ================================================ */
+          /* =================================================
+             HELLO / NAME
+             ================================================= */
 
-          if (type === "hello") {
+          if (
+            type ===
+            "hello"
+          ) {
 
             const name =
               String(
                 msg.name || ""
               )
                 .trim()
-                .slice(0, 20);
-
+                .slice(
+                  0,
+                  20
+                );
 
             if (name) {
 
-              player.name = name;
+              player.name =
+                name;
 
               this.broadcast(
                 room,
-                this.snapshot(room)
+                this.snapshot(
+                  room
+                )
               );
             }
 
@@ -511,42 +582,57 @@ export class RiotRoom {
           }
 
 
-          /* ================================================
+          /* =================================================
              UPGRADE
-          ================================================ */
+             ================================================= */
 
-          if (type === "upgrade") {
+          if (
+            type ===
+            "upgrade"
+          ) {
 
-            return this.handleUpgrade(
+            this.handleUpgrade(
               room,
               player,
               msg.upgrade
             );
+
+            return;
           }
 
 
-          /* ================================================
+          /* =================================================
              PING
-          ================================================ */
+             ================================================= */
 
-          if (type === "ping") {
+          if (
+            type ===
+            "ping"
+          ) {
 
-            return this.send(
+            this.send(
               server,
               {
-                type: "pong"
+                type:
+                  "pong"
               }
             );
+
+            return;
           }
 
-        } catch (error) {
+        } catch {
 
           this.send(
             server,
             {
-              type: "error",
+
+              type:
+                "error",
+
               message:
                 "INVALID MESSAGE"
+
             }
           );
         }
@@ -575,9 +661,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
+  /* =========================================================
      INPUT
-  ======================================================= */
+     ========================================================= */
 
   handleInput(
     room,
@@ -585,30 +671,38 @@ export class RiotRoom {
     msg
   ) {
 
-    if (!player.alive) {
+    if (!player.alive)
       return;
-    }
+
+
+    /*
+     * Never trust the client's position.
+     *
+     * The server controls movement.
+     */
 
 
     if (
       msg.input &&
-      typeof msg.input === "object"
+      typeof msg.input ===
+        "object"
     ) {
 
       player.input = {
 
-        w: !!msg.input.w,
+        w:
+          !!msg.input.w,
 
-        a: !!msg.input.a,
+        a:
+          !!msg.input.a,
 
-        s: !!msg.input.s,
+        s:
+          !!msg.input.s,
 
-        d: !!msg.input.d,
+        d:
+          !!msg.input.d
 
-        shooting:
-          !!msg.input.shooting
       };
-
 
       player.shooting =
         !!msg.input.shooting;
@@ -616,11 +710,15 @@ export class RiotRoom {
 
 
     const angle =
-      Number(msg.angle);
+      Number(
+        msg.angle
+      );
 
 
     if (
-      Number.isFinite(angle)
+      Number.isFinite(
+        angle
+      )
     ) {
 
       player.angle =
@@ -631,8 +729,8 @@ export class RiotRoom {
 
 
     /*
-      Soldier class selection.
-    */
+     * Only allow known classes.
+     */
 
     if (
       typeof msg.class ===
@@ -641,20 +739,26 @@ export class RiotRoom {
 
       const requested =
         msg.class
-          .toLowerCase()
-          .trim();
-
+          .toLowerCase();
 
       if (
-        CLASSES[requested]
+        CLASSES[
+          requested
+        ]
       ) {
+
+        /*
+         * Switching class also cancels
+         * an RPG reload.
+         */
 
         if (
           player.class !==
           requested
         ) {
 
-          player.reloadUntil = 0;
+          player.reloadUntil =
+            0;
         }
 
         player.class =
@@ -664,9 +768,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
+  /* =========================================================
      GAME LOOP
-  ======================================================= */
+     ========================================================= */
 
   gameTick() {
 
@@ -675,18 +779,13 @@ export class RiotRoom {
 
 
     for (
-      const room
-      of this.rooms.values()
+      const room of
+      this.rooms.values()
     ) {
 
-
-      /*
-        Movement.
-      */
-
       for (
-        const player
-        of room.players.values()
+        const player of
+        room.players.values()
       ) {
 
         this.updatePlayerMovement(
@@ -698,12 +797,6 @@ export class RiotRoom {
           player,
           now
         );
-
-
-        /*
-          Automatic firing for
-          Assaulter when holding click.
-        */
 
         if (
           player.alive &&
@@ -719,10 +812,6 @@ export class RiotRoom {
       }
 
 
-      /*
-        RPG projectiles.
-      */
-
       this.updateProjectiles(
         room,
         now
@@ -730,28 +819,32 @@ export class RiotRoom {
 
 
       /*
-        Broadcast state.
-      */
+       * Broadcast state every server tick.
+       */
 
       this.broadcast(
         room,
-        this.snapshot(room)
+        this.snapshot(
+          room
+        )
       );
     }
+
+    this.lastTick =
+      now;
   }
 
 
-  /* =======================================================
+  /* =========================================================
      MOVEMENT
-  ======================================================= */
+     ========================================================= */
 
   updatePlayerMovement(
     player
   ) {
 
-    if (!player.alive) {
+    if (!player.alive)
       return;
-    }
 
 
     let dx =
@@ -763,13 +856,8 @@ export class RiotRoom {
       (player.input.w ? 1 : 0);
 
 
-    if (
-      !dx &&
-      !dy
-    ) {
-
+    if (!dx && !dy)
       return;
-    }
 
 
     const length =
@@ -782,11 +870,6 @@ export class RiotRoom {
     dx /= length;
     dy /= length;
 
-
-    /*
-      Slightly faster base movement.
-      Movement upgrade increases it further.
-    */
 
     const speed =
       MOVE_BASE_SPEED +
@@ -809,10 +892,6 @@ export class RiotRoom {
     player.y +=
       dy * speed;
 
-
-    /*
-      Keep player inside map.
-    */
 
     player.x =
       Math.max(
@@ -837,8 +916,8 @@ export class RiotRoom {
 
 
     /*
-      Collision with obstacles.
-    */
+     * Obstacle collision.
+     */
 
     if (
       this.collidesWithObstacle(
@@ -848,15 +927,18 @@ export class RiotRoom {
       )
     ) {
 
-      player.x = oldX;
-      player.y = oldY;
+      player.x =
+        oldX;
+
+      player.y =
+        oldY;
     }
   }
 
 
-  /* =======================================================
+  /* =========================================================
      SHOOTING
-  ======================================================= */
+     ========================================================= */
 
   tryShoot(
     room,
@@ -865,49 +947,58 @@ export class RiotRoom {
   ) {
 
     const weapon =
-      CLASSES[player.class];
+      CLASSES[
+        player.class
+      ];
 
 
-    if (!weapon) {
+    if (!weapon)
       return;
-    }
 
 
     /*
-      Fire-rate upgrade.
-    */
+     * Fire-rate upgrade makes weapons shoot faster.
+     */
 
-    const fireDelay =
+    const fireMultiplier =
+      1 +
+      (
+        player.fireLevel *
+        0.10
+      );
+
+
+    const cooldown =
       Math.max(
         60,
         weapon.fireRate /
-          (
-            1 +
-            player.fireLevel *
-            0.10
-          )
+        fireMultiplier
       );
+
+
+    /*
+     * RPG has an explicit 2 second reload.
+     */
+
+    if (
+      player.class ===
+      "rpg"
+    ) {
+
+      if (
+        player.reloadUntil >
+        now
+      ) {
+        return;
+      }
+    }
 
 
     if (
       now -
       player.lastShot <
-      fireDelay
+      cooldown
     ) {
-
-      return;
-    }
-
-
-    /*
-      RPG reload.
-    */
-
-    if (
-      player.class === "rpg" &&
-      player.reloadUntil > now
-    ) {
-
       return;
     }
 
@@ -916,60 +1007,69 @@ export class RiotRoom {
       now;
 
 
-    switch (
-      player.class
+    if (
+      player.class ===
+      "rpg"
     ) {
 
-      case "assaulter":
+      this.fireRPG(
+        room,
+        player,
+        now
+      );
 
-        this.fireAssaulter(
-          room,
-          player
-        );
+      player.reloadUntil =
+        now +
+        2000;
 
-        break;
-
-
-      case "sniper":
-
-        this.fireSniper(
-          room,
-          player
-        );
-
-        break;
+      return;
+    }
 
 
-      case "rpg":
+    if (
+      player.class ===
+      "sniper"
+    ) {
 
-        this.fireRPG(
-          room,
-          player,
-          now
-        );
+      this.fireSniper(
+        room,
+        player
+      );
 
-        break;
+      return;
+    }
 
 
-      case "shotgun":
+    if (
+      player.class ===
+      "shotgun"
+    ) {
 
-        this.fireShotgun(
-          room,
-          player
-        );
+      this.fireShotgun(
+        room,
+        player
+      );
 
-        break;
+      return;
+    }
+
+
+    if (
+      player.class ===
+      "assaulter"
+    ) {
+
+      this.fireAssaulter(
+        room,
+        player
+      );
     }
   }
 
 
-  /* =======================================================
+  /* =========================================================
      ASSAULTER
-     
-     Hold click = rapid fire.
-     Damage decreases with distance.
-     Point blank = 100%.
-  ======================================================= */
+     ========================================================= */
 
   fireAssaulter(
     room,
@@ -980,62 +1080,59 @@ export class RiotRoom {
       this.findRayTarget(
         room,
         shooter,
-        700,
+        CLASSES.assaulter.range,
         0
       );
 
 
-    if (!target) {
+    if (!target)
       return;
-    }
 
 
     const distance =
       Math.hypot(
         target.x -
           shooter.x,
-
         target.y -
           shooter.y
       );
 
 
     /*
-      Point blank:
-      100% damage.
+     * Point blank = 100%.
+     *
+     * Damage gradually falls with distance.
+     */
 
-      Long distance:
-      lower damage.
-    */
-
-    const factor =
+    const distanceFactor =
       Math.max(
-        0.25,
-
+        ASSAULTER_MIN_DAMAGE_MULTIPLIER,
         1 -
-          (
-            distance /
-            700
-          ) *
-          0.75
+        (
+          distance /
+          CLASSES.assaulter.range
+        ) *
+        0.75
       );
+
+
+    const damage =
+      CLASSES.assaulter.damage *
+      distanceFactor;
 
 
     this.damagePlayer(
       room,
       shooter,
       target,
-      25 * factor
+      damage
     );
   }
 
 
-  /* =======================================================
+  /* =========================================================
      SNIPER
-     
-     One click = one shot.
-     Instant kill.
-  ======================================================= */
+     ========================================================= */
 
   fireSniper(
     room,
@@ -1046,15 +1143,18 @@ export class RiotRoom {
       this.findRayTarget(
         room,
         shooter,
-        5000,
+        CLASSES.sniper.range,
         0
       );
 
 
-    if (!target) {
+    if (!target)
       return;
-    }
 
+
+    /*
+     * Sniper is instant kill.
+     */
 
     this.killPlayer(
       room,
@@ -1065,25 +1165,26 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
+  /* =========================================================
      SHOTGUN
-     
-     Multiple pellets.
-     Spread fire.
-     Short range.
-  ======================================================= */
+     ========================================================= */
 
   fireShotgun(
     room,
     shooter
   ) {
 
+    const pellets =
+      CLASSES.shotgun
+        .pellets;
+
+
+    const baseAngle =
+      shooter.angle;
+
+
     const hitPlayers =
       new Set();
-
-
-    const pellets =
-      CLASSES.shotgun.pellets;
 
 
     for (
@@ -1092,26 +1193,31 @@ export class RiotRoom {
       i++
     ) {
 
-      /*
-        Spread from
-        left to right.
-      */
+      const t =
+        pellets === 1
+          ? 0
+          :
+          (
+            i /
+            (pellets - 1)
+          ) - 0.5;
 
-      const offset =
+
+      const angle =
+        baseAngle +
         (
-          i /
-          (pellets - 1) -
-          0.5
-        ) *
-        SHOTGUN_SPREAD;
+          t *
+          SHOTGUN_SPREAD
+        );
 
 
       const target =
         this.findRayTarget(
           room,
           shooter,
-          420,
-          offset
+          CLASSES.shotgun.range,
+          angle -
+          baseAngle
         );
 
 
@@ -1131,22 +1237,24 @@ export class RiotRoom {
           Math.hypot(
             target.x -
               shooter.x,
-
             target.y -
               shooter.y
           );
 
 
+        /*
+         * Shotgun is strongest up close.
+         */
+
         const factor =
           Math.max(
             0.15,
-
             1 -
-              (
-                distance /
-                420
-              ) *
-              0.85
+            (
+              distance /
+              CLASSES.shotgun.range
+            ) *
+            0.85
           );
 
 
@@ -1154,21 +1262,17 @@ export class RiotRoom {
           room,
           shooter,
           target,
-          24 * factor
+          CLASSES.shotgun.damage *
+          factor
         );
       }
     }
   }
 
 
-  /* =======================================================
+  /* =========================================================
      RPG
-     
-     Fires a missile.
-     2 second reload.
-     Explodes on impact.
-     Can hurt the shooter.
-  ======================================================= */
+     ========================================================= */
 
   fireRPG(
     room,
@@ -1176,10 +1280,15 @@ export class RiotRoom {
     now
   ) {
 
+    const speed =
+      32;
+
+
     room.projectiles.push({
 
       id:
-        crypto.randomUUID(),
+        crypto
+          .randomUUID(),
 
       type:
         "rpg",
@@ -1204,57 +1313,43 @@ export class RiotRoom {
       angle:
         shooter.angle,
 
-      speed:
-        18,
+      speed,
 
       damage:
-        120,
+        CLASSES.rpg.damage,
 
       createdAt:
         now,
 
       maxLifetime:
         5000
+
     });
-
-
-    /*
-      Reload is exactly
-      2 seconds before
-      reload upgrades.
-    */
-
-    const reloadMultiplier =
-      1 +
-      shooter.reloadLevel *
-      0.10;
-
-
-    shooter.reloadUntil =
-      now +
-      Math.max(
-        400,
-        2000 /
-          reloadMultiplier
-      );
   }
 
 
-  /* =======================================================
-     RPG PROJECTILES
-  ======================================================= */
+  /* =========================================================
+     PROJECTILE LOOP
+     ========================================================= */
 
   updateProjectiles(
     room,
     now
   ) {
 
+    if (
+      room.projectiles
+        .length === 0
+    )
+      return;
+
+
     const remaining = [];
 
 
     for (
-      const projectile
-      of room.projectiles
+      const projectile of
+      room.projectiles
     ) {
 
       projectile.x +=
@@ -1262,7 +1357,6 @@ export class RiotRoom {
           projectile.angle
         ) *
         projectile.speed;
-
 
       projectile.y +=
         Math.sin(
@@ -1272,52 +1366,64 @@ export class RiotRoom {
 
 
       let exploded =
+        false;
 
+
+      /*
+       * World bounds.
+       */
+
+      if (
         projectile.x < 0 ||
-
         projectile.x >
           WORLD_WIDTH ||
-
         projectile.y < 0 ||
-
         projectile.y >
-          WORLD_HEIGHT ||
+          WORLD_HEIGHT
+      ) {
+
+        exploded = true;
+      }
 
 
+      /*
+       * Obstacle collision.
+       */
+
+      if (
+        !exploded &&
         this.collidesWithObstacle(
           projectile.x,
           projectile.y,
           5
-        ) ||
+        )
+      ) {
 
-
-        now -
-          projectile.createdAt >
-          projectile.maxLifetime;
+        exploded = true;
+      }
 
 
       /*
-        Direct player collision.
-      */
+       * Player collision.
+       */
 
       if (!exploded) {
 
         for (
-          const target
-          of room.players.values()
+          const target of
+          room.players.values()
         ) {
 
-          if (!target.alive) {
+          if (
+            !target.alive
+          )
             continue;
-          }
 
 
           const distance =
             Math.hypot(
-
               target.x -
                 projectile.x,
-
               target.y -
                 projectile.y
             );
@@ -1333,6 +1439,20 @@ export class RiotRoom {
             break;
           }
         }
+      }
+
+
+      /*
+       * Lifetime.
+       */
+
+      if (
+        now -
+        projectile.createdAt >
+        projectile.maxLifetime
+      ) {
+
+        exploded = true;
       }
 
 
@@ -1357,9 +1477,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
+  /* =========================================================
      RPG EXPLOSION
-  ======================================================= */
+     ========================================================= */
 
   explodeRPG(
     room,
@@ -1372,22 +1492,26 @@ export class RiotRoom {
       );
 
 
+    /*
+     * Damage every player inside
+     * the explosion radius.
+     */
+
     for (
-      const target
-      of room.players.values()
+      const target of
+      room.players.values()
     ) {
 
-      if (!target.alive) {
+      if (
+        !target.alive
+      )
         continue;
-      }
 
 
       const distance =
         Math.hypot(
-
           target.x -
             projectile.x,
-
           target.y -
             projectile.y
         );
@@ -1396,18 +1520,22 @@ export class RiotRoom {
       if (
         distance >
         RPG_RADIUS
-      ) {
-
+      )
         continue;
-      }
 
+
+      /*
+       * Damage falls off from explosion center.
+       */
 
       const factor =
         Math.max(
           0,
           1 -
+          (
             distance /
             RPG_RADIUS
+          )
         );
 
 
@@ -1417,13 +1545,14 @@ export class RiotRoom {
 
 
       /*
-        RPG can damage
-        the person who fired it.
-      */
+       * The shooter can be killed
+       * by their own RPG.
+       */
 
       if (
         owner &&
-        target.id === owner.id
+        target.id ===
+        owner.id
       ) {
 
         this.damagePlayer(
@@ -1437,7 +1566,11 @@ export class RiotRoom {
           true
         );
 
-      } else if (owner) {
+        continue;
+      }
+
+
+      if (owner) {
 
         this.damagePlayer(
           room,
@@ -1450,9 +1583,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
-     FIND TARGET
-  ======================================================= */
+  /* =========================================================
+     RAYCAST
+     ========================================================= */
 
   findRayTarget(
     room,
@@ -1481,22 +1614,21 @@ export class RiotRoom {
 
 
     for (
-      const target
-      of room.players.values()
+      const target of
+      room.players.values()
     ) {
 
       if (
         target.id ===
         shooter.id
-      ) {
-
+      )
         continue;
-      }
 
 
-      if (!target.alive) {
+      if (
+        !target.alive
+      )
         continue;
-      }
 
 
       const vx =
@@ -1518,31 +1650,25 @@ export class RiotRoom {
       if (
         distance >
         range
-      ) {
-
+      )
         continue;
-      }
 
-
-      /*
-        Player must be
-        in front of shooter.
-      */
 
       const dot =
         vx * dirX +
         vy * dirY;
 
 
-      if (dot <= 0) {
+      if (
+        dot <= 0
+      )
         continue;
-      }
 
 
       /*
-        Distance from
-        the bullet ray.
-      */
+       * Perpendicular distance from
+       * the player's center to the shot ray.
+       */
 
       const perpendicular =
         Math.abs(
@@ -1554,15 +1680,14 @@ export class RiotRoom {
       if (
         perpendicular >
         PLAYER_RADIUS
-      ) {
-
+      )
         continue;
-      }
 
 
       /*
-        Obstacles block shots.
-      */
+       * Check obstacles between shooter
+       * and target.
+       */
 
       if (
         this.rayHitsObstacle(
@@ -1571,10 +1696,8 @@ export class RiotRoom {
           target.x,
           target.y
         )
-      ) {
-
+      )
         continue;
-      }
 
 
       if (
@@ -1595,9 +1718,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
+  /* =========================================================
      DAMAGE
-  ======================================================= */
+     ========================================================= */
 
   damagePlayer(
     room,
@@ -1608,11 +1731,10 @@ export class RiotRoom {
   ) {
 
     if (
-      !target?.alive
-    ) {
-
+      !target ||
+      !target.alive
+    )
       return;
-    }
 
 
     if (
@@ -1620,10 +1742,8 @@ export class RiotRoom {
         damage
       ) ||
       damage <= 0
-    ) {
-
+    )
       return;
-    }
 
 
     target.hp -=
@@ -1634,7 +1754,8 @@ export class RiotRoom {
       target.hp <= 0
     ) {
 
-      target.hp = 0;
+      target.hp =
+        0;
 
 
       this.killPlayer(
@@ -1643,16 +1764,15 @@ export class RiotRoom {
         target,
         attacker?.class ||
           "unknown",
-
         forceSelf
       );
     }
   }
 
 
-  /* =======================================================
+  /* =========================================================
      KILL
-  ======================================================= */
+     ========================================================= */
 
   killPlayer(
     room,
@@ -1662,9 +1782,11 @@ export class RiotRoom {
     forceSelf = false
   ) {
 
-    if (!target?.alive) {
+    if (
+      !target ||
+      !target.alive
+    )
       return;
-    }
 
 
     target.alive =
@@ -1673,21 +1795,27 @@ export class RiotRoom {
     target.hp =
       0;
 
+
     target.shooting =
       false;
 
+
     target.respawnAt =
-      Date.now() + 3000;
+      Date.now() +
+      3000;
 
 
     /*
-      Give AUX for a normal kill.
-    */
+     * Award AUX only when someone else
+     * kills the target.
+     *
+     * RPG self-kills don't reward AUX.
+     */
 
     if (
       attacker &&
       attacker.id !==
-        target.id &&
+      target.id &&
       !forceSelf
     ) {
 
@@ -1695,18 +1823,13 @@ export class RiotRoom {
         AUX_PER_KILL;
 
 
-      /*
-        Small hit notification.
-        Client can display:
-        +10 AUX
-      */
-
       this.sendToPlayer(
         room,
         attacker.id,
         {
 
-          type: "hit",
+          type:
+            "hit",
 
           killer_id:
             attacker.id,
@@ -1718,15 +1841,43 @@ export class RiotRoom {
 
           aux:
             AUX_PER_KILL
+
+        }
+      );
+
+
+      this.sendToPlayer(
+        room,
+        attacker.id,
+        {
+
+          type:
+            "player_stats",
+
+          player_id:
+            attacker.id,
+
+          aux:
+            attacker.aux,
+
+          reloadLevel:
+            attacker.reloadLevel,
+
+          fireLevel:
+            attacker.fireLevel,
+
+          moveLevel:
+            attacker.moveLevel
+
         }
       );
     }
   }
 
 
-  /* =======================================================
+  /* =========================================================
      RESPAWN
-  ======================================================= */
+     ========================================================= */
 
   updateRespawn(
     room,
@@ -1735,14 +1886,17 @@ export class RiotRoom {
   ) {
 
     if (
-      player.alive ||
+      player.alive
+    )
+      return;
+
+
+    if (
       !player.respawnAt ||
       now <
-        player.respawnAt
-    ) {
-
+      player.respawnAt
+    )
       return;
-    }
 
 
     const spawn =
@@ -1774,19 +1928,12 @@ export class RiotRoom {
 
     player.reloadUntil =
       0;
-
-    player.respawnAt =
-      0;
   }
 
 
-  /* =======================================================
+  /* =========================================================
      UPGRADES
-     
-     reload
-     fire
-     move
-  ======================================================= */
+     ========================================================= */
 
   handleUpgrade(
     room,
@@ -1794,7 +1941,36 @@ export class RiotRoom {
     upgrade
   ) {
 
-    const upgradeMap = {
+    const valid = [
+      "reload",
+      "fire",
+      "move"
+    ];
+
+
+    if (
+      !valid.includes(
+        upgrade
+      )
+    ) {
+
+      return this.sendToPlayer(
+        room,
+        player.id,
+        {
+
+          type:
+            "error",
+
+          message:
+            "INVALID UPGRADE"
+
+        }
+      );
+    }
+
+
+    const levelKey = {
 
       reload:
         "reloadLevel",
@@ -1804,37 +1980,19 @@ export class RiotRoom {
 
       move:
         "moveLevel"
-    };
+
+    }[upgrade];
 
 
-    const key =
-      upgradeMap[upgrade];
-
-
-    if (!key) {
-
-      return this.sendToPlayer(
-        room,
-        player.id,
-        {
-
-          type: "error",
-
-          message:
-            "INVALID UPGRADE"
-        }
-      );
-    }
-
-
-    const level =
+    const currentLevel =
       Number(
-        player[key] || 0
+        player[levelKey] ||
+        0
       );
 
 
     if (
-      level >=
+      currentLevel >=
       MAX_UPGRADE_LEVEL
     ) {
 
@@ -1843,28 +2001,23 @@ export class RiotRoom {
         player.id,
         {
 
-          type: "error",
+          type:
+            "error",
 
           message:
             "MAX UPGRADE"
+
         }
       );
     }
 
 
-    /*
-      Upgrade prices:
-
-      Level 0 -> 1 = 10 AUX
-      Level 1 -> 2 = 20 AUX
-      Level 2 -> 3 = 30 AUX
-      etc.
-    */
-
     const cost =
       UPGRADE_COST_BASE +
-      level *
-        UPGRADE_COST_STEP;
+      (
+        currentLevel *
+        UPGRADE_COST_STEP
+      );
 
 
     if (
@@ -1877,10 +2030,12 @@ export class RiotRoom {
         player.id,
         {
 
-          type: "error",
+          type:
+            "error",
 
           message:
             `NEED ${cost} AUX`
+
         }
       );
     }
@@ -1889,9 +2044,14 @@ export class RiotRoom {
     player.aux -=
       cost;
 
-    player[key] =
-      level + 1;
+    player[levelKey] =
+      currentLevel + 1;
 
+
+    /*
+     * Reload upgrade immediately affects
+     * RPG reload time.
+     */
 
     this.sendToPlayer(
       room,
@@ -1915,31 +2075,27 @@ export class RiotRoom {
 
         moveLevel:
           player.moveLevel
+
       }
     );
 
 
     this.broadcast(
       room,
-      this.snapshot(room)
+      this.snapshot(
+        room
+      )
     );
   }
 
 
-  /* =======================================================
-     RANDOM MAP
-     
-     Blocks have "AUX" text.
-  ======================================================= */
+  /* =========================================================
+     MAP GENERATION
+     ========================================================= */
 
   generateWorld() {
 
     const result = [];
-
-
-    /*
-      Random number of obstacles.
-    */
 
     const count =
       28 +
@@ -1958,7 +2114,6 @@ export class RiotRoom {
         100 +
         Math.random() *
         260;
-
 
       const height =
         80 +
@@ -1992,13 +2147,9 @@ export class RiotRoom {
         h:
           height,
 
-        /*
-          Client should render this
-          text inside the block.
-        */
-
         label:
           "AUX"
+
       });
     }
 
@@ -2007,9 +2158,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
+  /* =========================================================
      SPAWN
-  ======================================================= */
+     ========================================================= */
 
   findSpawn(
     room
@@ -2038,13 +2189,9 @@ export class RiotRoom {
             WORLD_HEIGHT -
             200
           )
+
       };
 
-
-      /*
-        Don't spawn inside
-        an obstacle.
-      */
 
       if (
         this.collidesWithObstacle(
@@ -2052,32 +2199,23 @@ export class RiotRoom {
           point.y,
           40
         )
-      ) {
-
+      )
         continue;
-      }
 
-
-      /*
-        Don't spawn directly
-        on another player.
-      */
 
       let tooClose =
         false;
 
 
       for (
-        const player
-        of room.players.values()
+        const player of
+        room.players.values()
       ) {
 
         if (
           Math.hypot(
-
             player.x -
               point.x,
-
             player.y -
               point.y
           ) < 150
@@ -2091,16 +2229,10 @@ export class RiotRoom {
       }
 
 
-      if (!tooClose) {
-
+      if (!tooClose)
         return point;
-      }
     }
 
-
-    /*
-      Fallback.
-    */
 
     return {
 
@@ -2109,13 +2241,14 @@ export class RiotRoom {
 
       y:
         WORLD_HEIGHT / 2
+
     };
   }
 
 
-  /* =======================================================
+  /* =========================================================
      OBSTACLE COLLISION
-  ======================================================= */
+     ========================================================= */
 
   collidesWithObstacle(
     x,
@@ -2124,14 +2257,13 @@ export class RiotRoom {
   ) {
 
     for (
-      const obstacle
-      of this.world
+      const obstacle of
+      this.world
     ) {
 
-      const cx =
+      const closestX =
         Math.max(
           obstacle.x,
-
           Math.min(
             x,
             obstacle.x +
@@ -2140,10 +2272,9 @@ export class RiotRoom {
         );
 
 
-      const cy =
+      const closestY =
         Math.max(
           obstacle.y,
-
           Math.min(
             y,
             obstacle.y +
@@ -2153,10 +2284,12 @@ export class RiotRoom {
 
 
       const dx =
-        x - cx;
+        x -
+        closestX;
 
       const dy =
-        y - cy;
+        y -
+        closestY;
 
 
       if (
@@ -2174,9 +2307,9 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
-     RAY / OBSTACLE
-  ======================================================= */
+  /* =========================================================
+     OBSTACLE RAYCAST
+     ========================================================= */
 
   rayHitsObstacle(
     x1,
@@ -2186,8 +2319,8 @@ export class RiotRoom {
   ) {
 
     for (
-      const obstacle
-      of this.world
+      const obstacle of
+      this.world
     ) {
 
       if (
@@ -2233,21 +2366,26 @@ export class RiotRoom {
 
 
     /*
-      Quick bounding check.
-    */
+     * Fast bounding-box rejection.
+     */
 
     if (
-      Math.max(x1, x2) <
-        left ||
-
-      Math.min(x1, x2) >
-        right ||
-
-      Math.max(y1, y2) <
-        top ||
-
-      Math.min(y1, y2) >
-        bottom
+      Math.max(
+        x1,
+        x2
+      ) < left ||
+      Math.min(
+        x1,
+        x2
+      ) > right ||
+      Math.max(
+        y1,
+        y2
+      ) < top ||
+      Math.min(
+        y1,
+        y2
+      ) > bottom
     ) {
 
       return false;
@@ -2255,39 +2393,32 @@ export class RiotRoom {
 
 
     /*
-      Starting point
-      inside rectangle.
-    */
+     * Start/end point inside rectangle.
+     */
 
     if (
       x1 >= left &&
       x1 <= right &&
       y1 >= top &&
       y1 <= bottom
-    ) {
-
+    )
       return true;
-    }
 
-
-    /*
-      Ending point
-      inside rectangle.
-    */
 
     if (
       x2 >= left &&
       x2 <= right &&
       y2 >= top &&
       y2 <= bottom
-    ) {
-
+    )
       return true;
-    }
 
+
+    /*
+     * Check each rectangle edge.
+     */
 
     return (
-
       this.segmentsIntersect(
         x1,
         y1,
@@ -2335,10 +2466,6 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
-     LINE INTERSECTION
-  ======================================================= */
-
   segmentsIntersect(
     x1,
     y1,
@@ -2350,7 +2477,7 @@ export class RiotRoom {
     y4
   ) {
 
-    const d =
+    const denominator =
       (
         (y4 - y3) *
         (x2 - x1)
@@ -2362,8 +2489,9 @@ export class RiotRoom {
 
 
     if (
-      Math.abs(d) <
-      0.000001
+      Math.abs(
+        denominator
+      ) < 0.000001
     ) {
 
       return false;
@@ -2376,7 +2504,8 @@ export class RiotRoom {
         (y1 - y3) -
         (y4 - y3) *
         (x1 - x3)
-      ) / d;
+      ) /
+      denominator;
 
 
     const ub =
@@ -2385,11 +2514,11 @@ export class RiotRoom {
         (y1 - y3) -
         (y2 - y1) *
         (x1 - x3)
-      ) / d;
+      ) /
+      denominator;
 
 
     return (
-
       ua >= 0 &&
       ua <= 1 &&
       ub >= 0 &&
@@ -2398,16 +2527,17 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
-     NORMALIZE ANGLE
-  ======================================================= */
+  /* =========================================================
+     HELPERS
+     ========================================================= */
 
   normalizeAngle(
     angle
   ) {
 
     while (
-      angle > Math.PI
+      angle >
+      Math.PI
     ) {
 
       angle -=
@@ -2416,7 +2546,8 @@ export class RiotRoom {
 
 
     while (
-      angle < -Math.PI
+      angle <
+      -Math.PI
     ) {
 
       angle +=
@@ -2427,10 +2558,6 @@ export class RiotRoom {
     return angle;
   }
 
-
-  /* =======================================================
-     SEND TO PLAYER
-  ======================================================= */
 
   sendToPlayer(
     room,
@@ -2454,10 +2581,6 @@ export class RiotRoom {
   }
 
 
-  /* =======================================================
-     SEND
-  ======================================================= */
-
   send(
     socket,
     data
@@ -2466,22 +2589,14 @@ export class RiotRoom {
     try {
 
       socket.send(
-        JSON.stringify(data)
+        JSON.stringify(
+          data
+        )
       );
 
-    } catch {
-
-      /*
-        Socket may already
-        be disconnected.
-      */
-    }
+    } catch {}
   }
 
-
-  /* =======================================================
-     BROADCAST
-  ======================================================= */
 
   broadcast(
     room,
@@ -2504,11 +2619,10 @@ export class RiotRoom {
     ) {
 
       if (
-        id === exclude
-      ) {
-
+        id ===
+        exclude
+      )
         continue;
-      }
 
 
       try {
@@ -2517,20 +2631,10 @@ export class RiotRoom {
           raw
         );
 
-      } catch {
-
-        /*
-          Ignore disconnected
-          sockets.
-        */
-      }
+      } catch {}
     }
   }
 
-
-  /* =======================================================
-     GAME SNAPSHOT
-  ======================================================= */
 
   snapshot(
     room
@@ -2541,10 +2645,10 @@ export class RiotRoom {
       type:
         "state",
 
-
       players:
         [
-          ...room.players.values()
+          ...room.players
+            .values()
         ].map(
           player => ({
 
@@ -2575,19 +2679,8 @@ export class RiotRoom {
             alive:
               player.alive,
 
-
-            /*
-              AUX shown by
-              client UI.
-            */
-
             aux:
               player.aux,
-
-
-            /*
-              Upgrade levels.
-            */
 
             reloadLevel:
               player.reloadLevel,
@@ -2598,21 +2691,16 @@ export class RiotRoom {
             moveLevel:
               player.moveLevel,
 
-
             /*
-              RPG reload status.
-            */
+             * Useful for the client HUD.
+             */
 
             reloading:
               player.reloadUntil >
               Date.now()
+
           })
-        ),
-
-
-      /*
-        RPG missiles.
-      */
+        ],
 
       projectiles:
         room.projectiles.map(
@@ -2632,16 +2720,13 @@ export class RiotRoom {
 
             angle:
               projectile.angle
+
           })
         ),
 
-
-      /*
-        Random map.
-      */
-
       map:
         this.world
+
     };
   }
 }
