@@ -16,6 +16,19 @@
   const WORLD_HEIGHT = 5000;
   const MAX_PLAYERS = 10;
 
+  // Client-side movement multiplier. The normal movement baseline is kept
+  // intact, then increased by 50% as requested.
+  const MOVE_SPEED_MULTIPLIER = 1.5;
+  const BASE_MOVE_SPEED = 5;
+  const MOVE_SPEED = BASE_MOVE_SPEED * MOVE_SPEED_MULTIPLIER;
+
+  // Visual-only projectile tuning. The server remains authoritative for hits.
+  const BULLET_VISUAL_SPEED = 3.2;
+  const BULLET_VISUAL_LIFE = 90;
+  const SHOTGUN_PELLETS = 8;
+  const SHOTGUN_SPREAD = 0.38;
+  const SHOTGUN_VISUAL_INTERVAL = 520;
+
   const CLASSES = {
     assaulter: { label: "ASSAULTER", color: "#e3485c" },
     sniper:    { label: "SNIPER",    color: "#82b1ff" },
@@ -496,6 +509,8 @@
   let animationId = 0;
   let inputTimer = 0;
   let assaultTimer = 0;
+  let shotgunTimer = 0;
+  let movementClock = performance.now();
   let destroyed = false;
 
   const palette = [
@@ -599,6 +614,10 @@
     if (data.class) p.class = data.class;
     p.alive = data.alive !== false;
 
+    if (id === String(myId) && (p.alive === false || Number(p.hp || 0) <= 0)) {
+      returnToClassSelection("YOU DIED — SELECT A CLASS");
+    }
+
     if (Number.isFinite(data.aux)) p.aux = data.aux;
     if (Number.isFinite(data.reloadLevel)) p.reloadLevel = data.reloadLevel;
     if (Number.isFinite(data.fireLevel)) p.fireLevel = data.fireLevel;
@@ -645,7 +664,7 @@
       `MOVE<br>LV ${myMoveLevel}`;
 
     root.querySelectorAll(".rs-class-button").forEach(btn => {
-      btn.classList.toggle("active", false);
+      btn.classList.toggle("active", btn.dataset.class === cls && !!classConfirmed);
     });
   }
 
@@ -739,6 +758,28 @@
     killNoteTimer = setTimeout(() => {
       killNoteEl.textContent = "";
     }, 2200);
+  }
+
+  function returnToClassSelection(reason = "YOU DIED") {
+    mouseDown = false;
+    keys.w = keys.a = keys.s = keys.d = false;
+
+    selectedClass = null;
+    classConfirmed = false;
+
+    const me = players[myId];
+    if (me) {
+      me.alive = false;
+      me.hp = 0;
+    }
+
+    respawnEl.textContent = reason;
+    respawnEl.style.display = "none";
+
+    // Stay connected to the room. Only the class gate returns.
+    classEl.classList.add("rs-selecting");
+    updateHud();
+    updatePlayerList();
   }
 
   function joinRoom() {
@@ -881,7 +922,12 @@
           myReloadLevel = Number(me.reloadLevel || 0);
           myFireLevel = Number(me.fireLevel || 0);
           myMoveLevel = Number(me.moveLevel || 0);
-          selectedClass = me.class || selectedClass;
+
+          if (me.alive === false || Number(me.hp || 0) <= 0) {
+            returnToClassSelection("YOU DIED — SELECT A CLASS");
+          } else if (me.class) {
+            selectedClass = me.class;
+          }
         }
 
         updatePlayerList();
@@ -909,6 +955,16 @@
         if (Number.isFinite(message.y)) p.targetY = message.y;
         if (Number.isFinite(message.angle)) p.targetAngle = message.angle;
         if (message.class) p.class = message.class;
+
+        // Newer Workers may include the authoritative shooting flag.
+        // Render a visible enemy shot without changing server hit logic.
+        if (
+          message.shooting === true &&
+          String(message.player_id) !== String(myId) &&
+          p.alive !== false
+        ) {
+          spawnShotVisual(p.class || "assaulter", p);
+        }
         return;
       }
 
@@ -930,6 +986,20 @@
           );
 
           updateHud();
+        }
+        return;
+      }
+
+      if (
+        message.type === "player_died" ||
+        message.type === "player_dead" ||
+        message.type === "death"
+      ) {
+        if (
+          message.player_id == null ||
+          String(message.player_id) === String(myId)
+        ) {
+          returnToClassSelection("YOU DIED — SELECT A CLASS");
         }
         return;
       }
@@ -997,7 +1067,34 @@
     ) return;
 
     const me = players[myId];
-    if (!me || !classConfirmed || !selectedClass) return;
+    if (!me || !classConfirmed || !selectedClass || me.alive === false) return;
+
+    const now = performance.now();
+    const dt = Math.min(0.05, Math.max(0, (now - movementClock) / 1000));
+    movementClock = now;
+
+    // Apply a responsive 50%-faster local movement step. Sending x/y as well
+    // keeps this compatible with the current authoritative worker protocol.
+    let mx = 0;
+    let my = 0;
+    if (keys.w) my -= 1;
+    if (keys.s) my += 1;
+    if (keys.a) mx -= 1;
+    if (keys.d) mx += 1;
+
+    const len = Math.hypot(mx, my);
+    if (len > 0) {
+      mx /= len;
+      my /= len;
+
+      const step = MOVE_SPEED * dt;
+      me.x = Math.max(20, Math.min(WORLD_WIDTH - 20, me.x + mx * step));
+      me.y = Math.max(20, Math.min(WORLD_HEIGHT - 20, me.y + my * step));
+
+      // Keep interpolation targets aligned with our locally predicted motion.
+      me.targetX = me.x;
+      me.targetY = me.y;
+    }
 
     const input = {
       w: !!keys.w,
@@ -1018,6 +1115,8 @@
       ws.send(JSON.stringify({
         type: "input",
         input,
+        x: me.x,
+        y: me.y,
         angle,
         class: selectedClass
       }));
@@ -1025,6 +1124,7 @@
       setStatus("SEND FAILED");
     }
   }
+
 
   function chooseClass(className) {
     if (!CLASSES[className] || !connected || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1229,30 +1329,59 @@
     ctx.restore();
   }
 
-  function spawnShotVisual(className) {
+  function spawnShotVisual(className, shooter = null) {
     if (!connected || !myId) return;
-    const me = players[myId];
+
+    const me = shooter || players[myId];
     if (!me) return;
+
     const origin = worldToScreen(me.x, me.y);
     const target = { x: mouseX, y: mouseY };
-    const dx = target.x - origin.x;
-    const dy = target.y - origin.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    const count = className === "shotgun" ? 8 : 1;
-    const spread = className === "shotgun" ? 0.22 : 0;
+
+    // For remote shooters, use their authoritative facing angle.
+    let baseAngle;
+    if (shooter && shooter.id !== myId) {
+      baseAngle = Number(me.angle || 0);
+    } else {
+      const dx = target.x - origin.x;
+      const dy = target.y - origin.y;
+      baseAngle = Math.atan2(dy, dx);
+    }
+
+    // RPG is a shell only — never create ordinary bullet visuals for it.
+    if (className === "rpg") return;
+
+    const count = className === "shotgun" ? SHOTGUN_PELLETS : 1;
+    const spread = className === "shotgun" ? SHOTGUN_SPREAD : 0;
+
     for (let i = 0; i < count; i++) {
-      const a = Math.atan2(uy, ux) + (count === 1 ? 0 : (i / (count - 1) - .5) * spread);
+      const offset =
+        count === 1
+          ? 0
+          : ((i / (count - 1)) - 0.5) * spread;
+
+      // Slight randomization makes shotgun spread feel natural.
+      const a =
+        baseAngle +
+        offset +
+        (className === "shotgun" ? (Math.random() - 0.5) * 0.055 : 0);
+
+      const speed =
+        className === "shotgun"
+          ? BULLET_VISUAL_SPEED * 0.92
+          : BULLET_VISUAL_SPEED;
+
       visualProjectiles.push({
         x: origin.x + Math.cos(a) * 10,
         y: origin.y + Math.sin(a) * 10,
-        vx: Math.cos(a) * (className === "shotgun" ? 4.5 : 5.5),
-        vy: Math.sin(a) * (className === "shotgun" ? 4.5 : 5.5),
-        life: className === "sniper" ? 75 : 34,
-        radius: className === "shotgun" ? 2.2 : 2.8
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed,
+        life: className === "sniper" ? BULLET_VISUAL_LIFE + 20 : BULLET_VISUAL_LIFE,
+        radius: className === "shotgun" ? 2.5 : 2.8
       });
     }
   }
+
 
   function createRpgExplosion(x, y) {
     const pos = worldToScreen(Number(x || 0), Number(y || 0));
@@ -1483,9 +1612,13 @@
     if (event.button === 0) {
       mouseDown = true;
       lastAssaultVisualShot = 0;
-      if (selectedClass !== "assaulter" && selectedClass !== "rpg") {
-        spawnShotVisual(selectedClass);
+
+      if (selectedClass === "shotgun") {
+        spawnShotVisual("shotgun");
+      } else if (selectedClass === "sniper") {
+        spawnShotVisual("sniper");
       }
+      // RPG intentionally creates no ordinary bullet visual.
       sendInput();
       event.preventDefault();
     }
@@ -1591,12 +1724,24 @@
     }
   }, 25);
 
+  shotgunTimer = window.setInterval(() => {
+    if (connected && mouseDown && selectedClass === "shotgun") {
+      const now = performance.now();
+      if (now - lastAssaultVisualShot >= SHOTGUN_VISUAL_INTERVAL) {
+        lastAssaultVisualShot = now;
+        spawnShotVisual("shotgun");
+      }
+      sendInput();
+    }
+  }, 25);
+
   window.__riotSoldierCleanup = () => {
     destroyed = true;
 
     cancelAnimationFrame(animationId);
     clearInterval(inputTimer);
     clearInterval(assaultTimer);
+    clearInterval(shotgunTimer);
     clearTimeout(auxPopupTimer);
     clearTimeout(killNoteTimer);
 
