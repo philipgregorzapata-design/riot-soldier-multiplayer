@@ -1,7 +1,27 @@
 (() => {
-  // Remove a previous instance cleanly.
+  "use strict";
+
+  // RIOT SOLDIER MULTIPLAYER
+  // Transparent overlay client for the existing Riot dashboard.
+  // The Riot page remains visible underneath. The game world is fixed to
+  // the browser viewport; server-world coordinates are fitted into it.
+
   window.__riotSoldierCleanup?.();
   document.getElementById("riot-soldier-battle")?.remove();
+
+  const SERVER_URL =
+    "wss://riot-soldier-multiplayer.philipgregorzapata.workers.dev/ws";
+
+  const WORLD_WIDTH = 5000;
+  const WORLD_HEIGHT = 5000;
+  const MAX_PLAYERS = 10;
+
+  const CLASSES = {
+    assaulter: { label: "ASSAULTER", color: "#e3485c" },
+    sniper:    { label: "SNIPER",    color: "#82b1ff" },
+    rpg:       { label: "RPG",       color: "#e8c878" },
+    shotgun:   { label: "SHOTGUN",   color: "#f39b70" }
+  };
 
   const root = document.createElement("div");
   root.id = "riot-soldier-battle";
@@ -13,10 +33,10 @@
         inset: 0;
         width: 100vw;
         height: 100vh;
-        z-index: 999999;
+        z-index: 2147483000;
         overflow: hidden;
-        font-family: Arial, sans-serif;
         pointer-events: none;
+        font-family: Arial, Helvetica, sans-serif;
       }
 
       #riot-soldier-canvas {
@@ -24,178 +44,394 @@
         inset: 0;
         width: 100%;
         height: 100%;
+        display: block;
         pointer-events: none;
       }
 
-      #riot-soldier-controls {
+      #riot-soldier-battle.game-active #riot-soldier-canvas {
+        pointer-events: auto;
+        cursor: crosshair;
+      }
+
+      .rs-ui {
+        box-sizing: border-box;
+        color: rgba(255,255,255,.92);
+        background: rgba(18,20,29,.72);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 5px 20px rgba(0,0,0,.18);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+
+      #rs-controls {
         position: fixed;
-        left: 16px;
-        bottom: 16px;
+        left: 14px;
+        bottom: 14px;
+        z-index: 20;
         display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-        z-index: 1000000;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
         pointer-events: auto;
       }
 
-      .riot-box {
-        padding: 8px 10px;
-        border-radius: 8px;
-        background: rgba(12,15,24,.82);
-        border: 1px solid rgba(255,255,255,.12);
-        color: rgba(255,255,255,.92);
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 1px;
-        box-shadow: 0 4px 18px rgba(0,0,0,.25);
-        backdrop-filter: blur(8px);
+      #rs-room-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
       }
 
-      .riot-input {
-        width: 180px;
-        margin-left: 5px;
-        padding: 6px 8px;
-        border-radius: 5px;
-        border: 1px solid #444;
-        background: #181b24;
-        color: white;
+      #rs-room-key {
+        width: 142px;
+        height: 29px;
+        padding: 0 9px;
+        border-radius: 6px;
         outline: none;
-      }
-
-      #riot-soldier-key {
-        width: 105px;
+        border: 1px solid rgba(255,255,255,.13);
+        background: rgba(12,14,21,.78);
+        color: #fff;
         text-transform: uppercase;
+        letter-spacing: 1px;
+        font-size: 11px;
+        font-weight: 700;
+        pointer-events: auto;
       }
 
-      .riot-button {
-        padding: 8px 14px;
-        border-radius: 8px;
-        border: 1px solid rgba(255,255,255,.11);
-        background: rgba(18,21,30,.86);
-        color: rgba(255,255,255,.95);
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 1px;
+      #rs-room-key::placeholder {
+        color: rgba(255,255,255,.38);
+      }
+
+      #rs-room-key:focus {
+        border-color: rgba(227,72,92,.75);
+      }
+
+      .rs-row {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+
+      .rs-button {
+        height: 29px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(18,21,30,.82);
+        color: rgba(255,255,255,.92);
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .8px;
         cursor: pointer;
       }
 
-      .riot-button:hover {
-        background: rgba(215,48,76,.85);
+      .rs-button:hover {
+        background: rgba(215,48,76,.82);
       }
 
-      #riot-soldier-status {
-        min-width: 130px;
-      }
-
-      #riot-soldier-player-count {
-        position: fixed;
-        right: 16px;
-        bottom: 16px;
-        z-index: 1000000;
-      }
-
-      #riot-soldier-room {
-        position: fixed;
-        top: 16px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 1000000;
+      #rs-leave {
         display: none;
       }
 
-      #riot-soldier-room-key {
+      #rs-status {
+        padding: 5px 8px;
+        border-radius: 5px;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: .7px;
+        color: rgba(255,255,255,.70);
+        white-space: nowrap;
+      }
+
+      #rs-room {
+        display: none;
+        position: fixed;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 20;
+        padding: 5px 9px;
+        border-radius: 5px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 1px;
+        pointer-events: none;
+      }
+
+      #rs-room span {
         color: #ff4965;
       }
 
-      #riot-soldier-list {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 1000000;
-        min-width: 170px;
+      #rs-players {
         display: none;
+        position: fixed;
+        left: 14px;
+        top: 14px;
+        z-index: 20;
+        width: 150px;
+        padding: 8px 9px;
+        border-radius: 7px;
+        pointer-events: none;
       }
 
-      #riot-soldier-list-title {
-        margin-bottom: 7px;
-        color: white;
+      #rs-players-title {
+        color: rgba(255,255,255,.90);
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: 1.2px;
+        margin-bottom: 5px;
       }
 
-      .riot-player {
-        font-size: 10px;
-        padding: 3px 0;
-        color: rgba(255,255,255,.75);
+      .rs-player {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 0;
+        font-size: 8px;
+        color: rgba(255,255,255,.62);
       }
 
-      .riot-player.you {
+      .rs-player.you {
         color: #42b982;
       }
 
-      #riot-soldier-controls-help {
-        position: fixed; left: clamp(8px,1vw,16px); bottom: clamp(78px,9vh,105px);
-        z-index: 1000001; display:none; pointer-events:none;
-        color:rgba(255,255,255,.45); font-size:clamp(7px,.58vw,9px);
-        line-height:1.55; letter-spacing:.35px; text-shadow:0 1px 2px rgba(0,0,0,.4);
+      #rs-hud {
+        display: none;
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        z-index: 20;
+        min-width: 175px;
+        padding: 8px 10px;
+        border-radius: 7px;
+        pointer-events: auto;
       }
-      #riot-soldier-controls-help .help-title { color:rgba(255,255,255,.65); font-weight:800; letter-spacing:1px; margin-bottom:2px; }
-      #riot-soldier-controls-help b { display:inline-block; min-width:48px; color:rgba(255,255,255,.72); }
 
-      #riot-soldier-key-display { display:none; }
-      .riot-neon-bullet { filter:drop-shadow(0 0 5px #fff) drop-shadow(0 0 10px #fff); }
+      #rs-hud-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      #rs-class-label {
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1px;
+      }
+
+      #rs-aux {
+        color: #e8c878;
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      #rs-kill-note {
+        margin-top: 3px;
+        min-height: 10px;
+        color: rgba(255,255,255,.68);
+        font-size: 8px;
+        font-weight: 700;
+      }
+
+      #rs-upgrades {
+        display: flex;
+        gap: 4px;
+        margin-top: 6px;
+      }
+
+      .rs-upgrade {
+        flex: 1;
+        padding: 5px 4px;
+        border-radius: 5px;
+        border: 1px solid rgba(255,255,255,.09);
+        background: rgba(0,0,0,.20);
+        color: rgba(255,255,255,.76);
+        font-size: 7px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .rs-upgrade:hover {
+        background: rgba(255,255,255,.10);
+      }
+
+      #rs-class {
+        display: none;
+        position: fixed;
+        left: 14px;
+        bottom: 83px;
+        z-index: 20;
+        pointer-events: auto;
+      }
+
+      #rs-class-title {
+        margin-bottom: 4px;
+        color: rgba(255,255,255,.58);
+        font-size: 7px;
+        font-weight: 900;
+        letter-spacing: 1.1px;
+      }
+
+      #rs-class-buttons {
+        display: flex;
+        gap: 4px;
+      }
+
+      .rs-class-button {
+        padding: 6px 7px;
+        border-radius: 5px;
+        border: 1px solid rgba(255,255,255,.09);
+        background: rgba(18,20,29,.72);
+        color: rgba(255,255,255,.68);
+        font-size: 7px;
+        font-weight: 900;
+        letter-spacing: .4px;
+        cursor: pointer;
+      }
+
+      .rs-class-button:hover,
+      .rs-class-button.active {
+        color: #fff;
+        border-color: rgba(227,72,92,.65);
+        background: rgba(227,72,92,.28);
+      }
+
+      #rs-aux-popup {
+        position: fixed;
+        left: 14px;
+        bottom: 126px;
+        z-index: 20;
+        display: none;
+        padding: 4px 7px;
+        border-radius: 5px;
+        color: #e8c878;
+        background: rgba(18,20,29,.68);
+        border: 1px solid rgba(232,200,120,.18);
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: .5px;
+        pointer-events: none;
+      }
+
+      #rs-controls-help {
+        display: none;
+        position: fixed;
+        left: clamp(7px, 1vw, 14px);
+        bottom: clamp(118px, 14vh, 150px);
+        z-index: 21;
+        padding: 4px 7px;
+        border-left: 1px solid rgba(255,255,255,.12);
+        color: rgba(255,255,255,.42);
+        font-size: clamp(6px, .52vw, 8px);
+        line-height: 1.55;
+        letter-spacing: .35px;
+        pointer-events: none;
+        text-shadow: 0 1px 2px rgba(0,0,0,.35);
+      }
+      #rs-controls-help .rs-help-title {
+        color: rgba(255,255,255,.58);
+        font-size: clamp(6px, .48vw, 8px);
+        font-weight: 900;
+        letter-spacing: 1px;
+        margin-bottom: 2px;
+      }
+      #rs-controls-help b {
+        display: inline-block;
+        min-width: 38px;
+        color: rgba(255,255,255,.68);
+        font-weight: 900;
+      }
+
+      #rs-respawn {
+        display: none;
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%,-50%);
+        z-index: 20;
+        padding: 7px 10px;
+        border-radius: 6px;
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1px;
+        pointer-events: none;
+      }
+
+      @media (max-width: 700px) {
+        #rs-players {
+          width: 125px;
+        }
+
+        #rs-hud {
+          min-width: 145px;
+        }
+
+        .rs-class-button {
+          padding: 5px 5px;
+          font-size: 6px;
+        }
+      }
     </style>
 
     <canvas id="riot-soldier-canvas"></canvas>
 
-    <div id="riot-soldier-controls">
-      <div class="riot-box">
-        SERVER
-        <input
-          id="riot-soldier-server"
-          class="riot-input"
-          placeholder="ws://YOUR-VM:8080"
-        >
+    <div id="rs-controls">
+      <div id="rs-room-controls">
+        <input id="rs-room-key"
+          maxlength="32"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="ROOM KEY">
+        <div class="rs-row">
+          <button id="rs-join" class="rs-button">JOIN ROOM</button>
+          <button id="rs-leave" class="rs-button">LEAVE</button>
+          <div id="rs-status" class="rs-ui">OFFLINE</div>
+        </div>
       </div>
+    </div>
 
-      <div class="riot-box">
-        KEY
-        <input
-          id="riot-soldier-key"
-          class="riot-input"
-          placeholder="ABCD-1234"
-          maxlength="9"
-        >
+    <div id="rs-room" class="rs-ui">
+      ROOM: <span id="rs-room-value"></span>
+    </div>
+
+    <div id="rs-players" class="rs-ui">
+      <div id="rs-players-title">PLAYERS <span id="rs-count">0/10</span></div>
+      <div id="rs-player-list"></div>
+    </div>
+
+    <div id="rs-hud" class="rs-ui">
+      <div id="rs-hud-top">
+        <div id="rs-class-label">ASSAULTER</div>
+        <div id="rs-aux">AUX 0</div>
       </div>
-
-      <button id="riot-soldier-join" class="riot-button">JOIN ROOM</button>
-      <button id="riot-soldier-leave" class="riot-button">LEAVE</button>
-
-      <div id="riot-soldier-status" class="riot-box">OFFLINE</div>
+      <div id="rs-kill-note"></div>
+      <div id="rs-upgrades">
+        <button class="rs-upgrade" data-upgrade="reload">RELOAD<br>LV 0</button>
+        <button class="rs-upgrade" data-upgrade="fire">FIRE<br>LV 0</button>
+        <button class="rs-upgrade" data-upgrade="move">MOVE<br>LV 0</button>
+      </div>
     </div>
 
-    <div id="riot-soldier-room" class="riot-box">
-      ROOM: <span id="riot-soldier-room-key"></span>
+    <div id="rs-class">
+      <div id="rs-class-title">CLASS</div>
+      <div id="rs-class-buttons">
+        <button class="rs-class-button active" data-class="assaulter">ASSAULT</button>
+        <button class="rs-class-button" data-class="sniper">SNIPER</button>
+        <button class="rs-class-button" data-class="rpg">RPG</button>
+        <button class="rs-class-button" data-class="shotgun">SHOTGUN</button>
+      </div>
     </div>
 
-    <div id="riot-soldier-list" class="riot-box">
-      <div id="riot-soldier-list-title">PLAYERS</div>
-      <div id="riot-soldier-players"></div>
-    </div>
-
-    <div id="riot-soldier-player-count" class="riot-box">
-      PLAYERS: 0 / 10
-    </div>
-
-    <div id="riot-soldier-controls-help">
-      <div class="help-title">CONTROLS</div>
+    <div id="rs-controls-help">
+      <div class="rs-help-title">CONTROLS</div>
       <div><b>W A S D</b> MOVE</div>
       <div><b>LMB</b> SHOOT</div>
       <div><b>R</b> RELOAD</div>
-      <div><b>1</b> ASSAULTER</div>
-      <div><b>2</b> SNIPER</div>
-      <div><b>3</b> RPG</div>
-      <div><b>4</b> SHOTGUN</div>
+      <div><b>1-4</b> CLASS</div>
     </div>
+
+    <div id="rs-aux-popup"></div>
+    <div id="rs-respawn" class="rs-ui">RESPAWNING...</div>
   `;
 
   document.body.appendChild(root);
@@ -203,28 +439,39 @@
   const canvas = root.querySelector("#riot-soldier-canvas");
   const ctx = canvas.getContext("2d");
 
-  const serverInput = root.querySelector("#riot-soldier-server");
-  const keyInput = root.querySelector("#riot-soldier-key");
-  const joinButton = root.querySelector("#riot-soldier-join");
-  const leaveButton = root.querySelector("#riot-soldier-leave");
-  const status = root.querySelector("#riot-soldier-status");
-  const roomBox = root.querySelector("#riot-soldier-room");
-  const roomKey = root.querySelector("#riot-soldier-room-key");
-  const playerList = root.querySelector("#riot-soldier-list");
-  const playersElement = root.querySelector("#riot-soldier-players");
-  const playerCount = root.querySelector("#riot-soldier-player-count");
-  const controlsHelp = root.querySelector("#riot-soldier-controls-help");
+  const roomKeyInput = root.querySelector("#rs-room-key");
+  const joinButton = root.querySelector("#rs-join");
+  const leaveButton = root.querySelector("#rs-leave");
+  const statusEl = root.querySelector("#rs-status");
 
-  let W = innerWidth;
-  let H = innerHeight;
-  let animationId = 0;
-  let inputTimer = 0;
-  let destroyed = false;
+  const roomEl = root.querySelector("#rs-room");
+  const roomValueEl = root.querySelector("#rs-room-value");
+
+  const playersEl = root.querySelector("#rs-players");
+  const playerListEl = root.querySelector("#rs-player-list");
+  const countEl = root.querySelector("#rs-count");
+
+  const hudEl = root.querySelector("#rs-hud");
+  const classLabelEl = root.querySelector("#rs-class-label");
+  const auxEl = root.querySelector("#rs-aux");
+  const killNoteEl = root.querySelector("#rs-kill-note");
+
+  const classEl = root.querySelector("#rs-class");
+  const auxPopupEl = root.querySelector("#rs-aux-popup");
+  const respawnEl = root.querySelector("#rs-respawn");
+  const controlsHelp = root.querySelector("#rs-controls-help");
+
+  let W = window.innerWidth;
+  let H = window.innerHeight;
+  let dpr = 1;
 
   let ws = null;
   let connected = false;
   let myId = null;
-  let currentRoom = null;
+  let roomKey = null;
+
+  let worldMap = [];
+  let worldProjectiles = [];
 
   const players = Object.create(null);
   const keys = Object.create(null);
@@ -232,119 +479,228 @@
   let mouseX = W / 2;
   let mouseY = H / 2;
   let mouseDown = false;
+
   let selectedClass = null;
-  const CLASS_KEYS = {"1":"assaulter","2":"sniper","3":"rpg","4":"shotgun"};
+  let myAux = 0;
+  let myReloadLevel = 0;
+  let myFireLevel = 0;
+  let myMoveLevel = 0;
+
+  let auxPopupTimer = 0;
+  let killNoteTimer = 0;
+  let animationId = 0;
+  let inputTimer = 0;
+  let destroyed = false;
 
   const palette = [
     "#42b982", "#e3485c", "#82b1ff", "#e8c878", "#f39b70",
     "#b58cff", "#5bd7d0", "#ff8ca1", "#d2e66e", "#ff9b52"
   ];
 
-  function chooseClass(cls) {
-    selectedClass = cls;
-    root.dataset.class = cls;
-    const labels = {assaulter:"ASSAULTER", sniper:"SNIPER", rpg:"RPG", shotgun:"SHOTGUN"};
-    document.querySelectorAll("#riot-soldier-class-select button").forEach(b => b.classList.toggle("selected", b.dataset.class===cls));
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type:"select_class", class:cls}));
+  function setStatus(text) {
+    statusEl.textContent = text;
   }
-
-  function onKeyDown(e) {
-    if (!connected) return;
-    const t=e.target;
-    if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return;
-    const k=e.key.toLowerCase();
-    if (CLASS_KEYS[e.key]) { chooseClass(CLASS_KEYS[e.key]); e.preventDefault(); return; }
-    if (["w","a","s","d"].includes(k)) { keys[k]=true; e.preventDefault(); return; }
-    if (k==="r") { if(ws?.readyState===WebSocket.OPEN) ws.send(JSON.stringify({type:"reload"})); e.preventDefault(); }
-  }
-  function onKeyUp(e) { if(["w","a","s","d"].includes(e.key.toLowerCase())) { keys[e.key.toLowerCase()]=false; e.preventDefault(); } }
 
   function resize() {
-    W = innerWidth;
-    H = innerHeight;
+    W = Math.max(1, window.innerWidth);
+    H = Math.max(1, window.innerHeight);
 
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+
     canvas.width = Math.floor(W * dpr);
     canvas.height = Math.floor(H * dpr);
     canvas.style.width = W + "px";
     canvas.style.height = H + "px";
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  function setStatus(text) {
-    status.textContent = text;
+  /*
+   * Fit the complete server world into the visible browser area.
+   * There is deliberately NO camera and NO scrolling.
+   */
+  function worldViewport() {
+    const marginX = Math.min(28, W * 0.02);
+    const marginY = Math.min(70, H * 0.07);
+
+    const availableW = Math.max(100, W - marginX * 2);
+    const availableH = Math.max(100, H - marginY * 2);
+
+    const scale = Math.min(
+      availableW / WORLD_WIDTH,
+      availableH / WORLD_HEIGHT
+    );
+
+    const mapW = WORLD_WIDTH * scale;
+    const mapH = WORLD_HEIGHT * scale;
+
+    return {
+      x: (W - mapW) / 2,
+      y: (H - mapH) / 2,
+      w: mapW,
+      h: mapH,
+      scale
+    };
   }
 
-  function randomSpawn() {
+  function worldToScreen(x, y) {
+    const v = worldViewport();
     return {
-      x: 70 + Math.random() * Math.max(100, W - 140),
-      y: 100 + Math.random() * Math.max(100, H - 170)
+      x: v.x + x * v.scale,
+      y: v.y + y * v.scale
+    };
+  }
+
+  function screenToWorld(x, y) {
+    const v = worldViewport();
+    return {
+      x: (x - v.x) / v.scale,
+      y: (y - v.y) / v.scale
     };
   }
 
   function normalizePlayer(data) {
-    const spawn = randomSpawn();
-
     return {
       id: data.id,
       name: data.name || "PLAYER",
-      x: Number.isFinite(data.x) ? data.x : spawn.x,
-      y: Number.isFinite(data.y) ? data.y : spawn.y,
-      targetX: Number.isFinite(data.x) ? data.x : spawn.x,
-      targetY: Number.isFinite(data.y) ? data.y : spawn.y,
+      x: Number.isFinite(data.x) ? data.x : WORLD_WIDTH / 2,
+      y: Number.isFinite(data.y) ? data.y : WORLD_HEIGHT / 2,
+      targetX: Number.isFinite(data.x) ? data.x : WORLD_WIDTH / 2,
+      targetY: Number.isFinite(data.y) ? data.y : WORLD_HEIGHT / 2,
       angle: Number.isFinite(data.angle) ? data.angle : 0,
       targetAngle: Number.isFinite(data.angle) ? data.angle : 0,
       hp: Number.isFinite(data.hp) ? data.hp : 100,
       maxHp: Number.isFinite(data.maxHp) ? data.maxHp : 100,
       class: data.class || "assaulter",
-      alive: data.alive !== false
+      alive: data.alive !== false,
+      aux: Number.isFinite(data.aux) ? data.aux : 0,
+      reloadLevel: Number(data.reloadLevel || 0),
+      fireLevel: Number(data.fireLevel || 0),
+      moveLevel: Number(data.moveLevel || 0),
+      reloading: !!data.reloading
     };
   }
 
   function updatePlayer(data) {
     if (!data || data.id == null) return;
 
-    const existing = players[data.id];
-    if (!existing) {
-      players[data.id] = normalizePlayer(data);
+    const id = String(data.id);
+    const p = players[id];
+
+    if (!p) {
+      players[id] = normalizePlayer(data);
       return;
     }
 
-    existing.name = data.name || existing.name;
-    existing.targetX = Number.isFinite(data.x) ? data.x : existing.targetX;
-    existing.targetY = Number.isFinite(data.y) ? data.y : existing.targetY;
-    existing.targetAngle = Number.isFinite(data.angle)
-      ? data.angle
-      : existing.targetAngle;
-    existing.hp = Number.isFinite(data.hp) ? data.hp : existing.hp;
-    existing.maxHp = Number.isFinite(data.maxHp) ? data.maxHp : existing.maxHp;
-    existing.class = data.class || existing.class;
-    existing.alive = data.alive !== false;
+    p.name = data.name || p.name;
+    if (Number.isFinite(data.x)) p.targetX = data.x;
+    if (Number.isFinite(data.y)) p.targetY = data.y;
+    if (Number.isFinite(data.angle)) p.targetAngle = data.angle;
+    if (Number.isFinite(data.hp)) p.hp = data.hp;
+    if (Number.isFinite(data.maxHp)) p.maxHp = data.maxHp;
+    if (data.class) p.class = data.class;
+    p.alive = data.alive !== false;
+
+    if (Number.isFinite(data.aux)) p.aux = data.aux;
+    if (Number.isFinite(data.reloadLevel)) p.reloadLevel = data.reloadLevel;
+    if (Number.isFinite(data.fireLevel)) p.fireLevel = data.fireLevel;
+    if (Number.isFinite(data.moveLevel)) p.moveLevel = data.moveLevel;
+    if ("reloading" in data) p.reloading = !!data.reloading;
+  }
+
+  function applyMyStats(data) {
+    if (!data) return;
+
+    if (Number.isFinite(data.aux)) myAux = data.aux;
+    if (Number.isFinite(data.reloadLevel)) myReloadLevel = data.reloadLevel;
+    if (Number.isFinite(data.fireLevel)) myFireLevel = data.fireLevel;
+    if (Number.isFinite(data.moveLevel)) myMoveLevel = data.moveLevel;
+
+    const me = players[myId];
+    if (me) {
+      me.aux = myAux;
+      me.reloadLevel = myReloadLevel;
+      me.fireLevel = myFireLevel;
+      me.moveLevel = myMoveLevel;
+    }
+
+    updateHud();
+  }
+
+  function updateHud() {
+    const me = players[myId];
+
+    const cls = selectedClass || me?.class || "assaulter";
+
+    classLabelEl.textContent =
+      CLASSES[cls]?.label || String(cls).toUpperCase();
+
+    auxEl.textContent = `AUX ${myAux}`;
+
+    root.querySelector('[data-upgrade="reload"]').innerHTML =
+      `RELOAD<br>LV ${myReloadLevel}`;
+
+    root.querySelector('[data-upgrade="fire"]').innerHTML =
+      `FIRE<br>LV ${myFireLevel}`;
+
+    root.querySelector('[data-upgrade="move"]').innerHTML =
+      `MOVE<br>LV ${myMoveLevel}`;
+
+    root.querySelectorAll(".rs-class-button").forEach(btn => {
+      btn.classList.toggle("active", !!selectedClass && btn.dataset.class === selectedClass);
+    });
   }
 
   function updatePlayerList() {
     const list = Object.values(players);
 
-    playerCount.textContent = `PLAYERS: ${list.length} / 10`;
-    playersElement.innerHTML = "";
+    countEl.textContent = `${list.length}/${MAX_PLAYERS}`;
+    playerListEl.innerHTML = "";
 
-    list.forEach((player, index) => {
+    list.forEach((p, index) => {
       const row = document.createElement("div");
-      row.className = "riot-player" + (player.id === myId ? " you" : "");
-      row.textContent = `${index + 1}. ${
-        player.id === myId ? "YOU" : (player.name || "PLAYER")
-      }`;
-      playersElement.appendChild(row);
+      row.className = "rs-player" + (p.id === myId ? " you" : "");
+
+      const left = document.createElement("span");
+      left.textContent =
+        `${index + 1}. ${p.id === myId ? "YOU" : (p.name || "PLAYER")}`;
+
+      const right = document.createElement("span");
+      right.textContent =
+        CLASSES[p.class]?.label?.slice(0, 3) || "???";
+
+      row.appendChild(left);
+      row.appendChild(right);
+      playerListEl.appendChild(row);
     });
   }
 
-  function resetConnectionUI() {
-    roomBox.style.display = "none";
-    playerList.style.display = "none";
+  function setGameActive(active) {
+    root.classList.toggle("game-active", active);
+
+    roomEl.style.display = active ? "block" : "none";
+    playersEl.style.display = active ? "block" : "none";
+    hudEl.style.display = active ? "block" : "none";
+    classEl.style.display = active ? "block" : "none";
+    leaveButton.style.display = active ? "inline-block" : "none";
+    joinButton.style.display = active ? "none" : "inline-block";
+
+    // Before joining, the game layer cannot intercept the Riot dashboard.
+    // After joining, the transparent overlay captures mouse interaction.
+    root.style.pointerEvents = active ? "auto" : "none";
+
+    // Restore interaction for the small pre-game controls.
+    if (!active) {
+      root.style.pointerEvents = "none";
+      document.body.style.cursor = "";
+    } else {
+      document.body.style.cursor = "";
+    }
   }
 
   function clearPlayers() {
-    Object.keys(players).forEach(id => delete players[id]);
+    for (const id of Object.keys(players)) delete players[id];
+    worldProjectiles = [];
     updatePlayerList();
   }
 
@@ -362,47 +718,66 @@
     ws = null;
   }
 
-  function connect() {
-    const server = serverInput.value.trim();
-    const key = keyInput.value.trim().toUpperCase();
+  function showAuxPopup(amount) {
+    auxPopupEl.textContent = `+${amount} AUX`;
+    auxPopupEl.style.display = "block";
 
-    if (!server) {
-      setStatus("ENTER SERVER");
-      return;
-    }
+    clearTimeout(auxPopupTimer);
+    auxPopupTimer = setTimeout(() => {
+      auxPopupEl.style.display = "none";
+    }, 1400);
+  }
+
+  function showKillNote(text) {
+    killNoteEl.textContent = text;
+
+    clearTimeout(killNoteTimer);
+    killNoteTimer = setTimeout(() => {
+      killNoteEl.textContent = "";
+    }, 2200);
+  }
+
+  function joinRoom() {
+    const key = roomKeyInput.value
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9-]/g, "")
+      .slice(0, 32);
+
+    roomKeyInput.value = key;
 
     if (!key) {
       setStatus("ENTER ROOM KEY");
-      return;
-    }
-
-    if (!/^wss?:\/\//i.test(server)) {
-      setStatus("USE ws:// OR wss://");
+      roomKeyInput.focus();
       return;
     }
 
     closeSocket();
     clearPlayers();
+
     connected = false;
-    controlsHelp.style.display = "none";
     myId = null;
-    keyInput.readOnly = true;
-  keyInput.style.display = "none";
-  roomBox.style.display = "block";
-  currentRoom = null;
+    roomKey = null;
+    myAux = 0;
+    myReloadLevel = 0;
+    myFireLevel = 0;
+    myMoveLevel = 0;
+    selectedClass = null;
+
+    setStatus("CONNECTING...");
 
     try {
-      ws = new WebSocket(server);
+      ws = new WebSocket(SERVER_URL);
     } catch {
       setStatus("INVALID SERVER");
       return;
     }
 
-    setStatus("CONNECTING...");
-
     ws.onopen = () => {
       if (!ws) return;
+
       setStatus("JOINING ROOM...");
+
       ws.send(JSON.stringify({
         type: "join_room",
         key
@@ -420,38 +795,64 @@
 
       if (message.type === "joined") {
         connected = true;
-    controlsHelp.style.display = "block";
-        myId = message.player_id;
-        keyInput.readOnly = true;
-  keyInput.style.display = "none";
-  roomBox.style.display = "block";
-  currentRoom = message.room || key;
+        myId = String(message.player_id);
+        roomKey = message.room || key;
 
-        roomKey.textContent = currentRoom;
-        roomBox.style.display = "block";
-        playerList.style.display = "block";
+        roomValueEl.textContent = roomKey;
+        roomKeyInput.value = roomKey;
+        roomKeyInput.readOnly = true;
+        roomKeyInput.setAttribute("aria-label", `Room ${roomKey}`);
+        setStatus(message.is_host ? "ONLINE HOST" : "ONLINE");
 
-        setStatus(message.is_host ? "CONNECTED HOST" : "CONNECTED");
+        if (Array.isArray(message.map)) {
+          worldMap = message.map;
+        }
+
+        setGameActive(true);
+        updatePlayerList();
+        updateHud();
 
         console.log(
-          "[RIOT SOLDIER] Joined room:",
-          currentRoom,
-          "Player ID:",
+          "[RIOT SOLDIER] joined",
+          roomKey,
           myId
         );
         return;
       }
 
       if (message.type === "state") {
-        const incoming = message.players || [];
-        const incomingIds = new Set(incoming.map(p => String(p.id)));
+        const incoming = Array.isArray(message.players)
+          ? message.players
+          : [];
 
-        Object.keys(players).forEach(id => {
-          if (!incomingIds.has(String(id))) delete players[id];
-        });
+        const ids = new Set(incoming.map(p => String(p.id)));
+
+        for (const id of Object.keys(players)) {
+          if (!ids.has(String(id))) delete players[id];
+        }
 
         incoming.forEach(updatePlayer);
+
+        if (Array.isArray(message.projectiles)) {
+          worldProjectiles = message.projectiles;
+        }
+
+        if (Array.isArray(message.map)) {
+          worldMap = message.map;
+        }
+
+        const me = players[myId];
+
+        if (me) {
+          myAux = Number(me.aux || 0);
+          myReloadLevel = Number(me.reloadLevel || 0);
+          myFireLevel = Number(me.fireLevel || 0);
+          myMoveLevel = Number(me.moveLevel || 0);
+          if (!selectedClass && me.class) selectedClass = null;
+        }
+
         updatePlayerList();
+        updateHud();
         return;
       }
 
@@ -461,27 +862,55 @@
         return;
       }
 
-      if (message.type === "player_input") {
-        const player = players[message.player_id];
-        if (!player) return;
-
-        if (Number.isFinite(message.x)) player.targetX = message.x;
-        if (Number.isFinite(message.y)) player.targetY = message.y;
-        if (Number.isFinite(message.angle)) player.targetAngle = message.angle;
-        if (message.class) player.class = message.class;
-        return;
-      }
-
       if (message.type === "player_left") {
-        delete players[message.player_id];
+        delete players[String(message.player_id)];
         updatePlayerList();
         return;
       }
 
+      if (message.type === "player_input") {
+        const p = players[String(message.player_id)];
+        if (!p) return;
+
+        if (Number.isFinite(message.x)) p.targetX = message.x;
+        if (Number.isFinite(message.y)) p.targetY = message.y;
+        if (Number.isFinite(message.angle)) p.targetAngle = message.angle;
+        if (message.class) p.class = message.class;
+        return;
+      }
+
+      if (message.type === "player_stats") {
+        if (String(message.player_id) === String(myId)) {
+          applyMyStats(message);
+        }
+        return;
+      }
+
+      if (message.type === "hit") {
+        if (String(message.killer_id) === String(myId)) {
+          const amount = Number(message.aux || 10);
+          myAux = Number(message.auxTotal ?? myAux + amount);
+
+          showAuxPopup(amount);
+          showKillNote(
+            `KILL +${amount} AUX${message.weapon ? ` • ${String(message.weapon).toUpperCase()}` : ""}`
+          );
+
+          updateHud();
+        }
+        return;
+      }
+
       if (message.type === "error") {
-        connected = false;
-    controlsHelp.style.display = "none";
-        setStatus(message.message || "ERROR");
+        setStatus(String(message.message || "ERROR"));
+
+        if (!connected) {
+          setGameActive(false);
+        }
+        return;
+      }
+
+      if (message.type === "pong") {
         return;
       }
     };
@@ -491,16 +920,36 @@
     };
 
     ws.onclose = () => {
+      if (destroyed) return;
+
       connected = false;
-    controlsHelp.style.display = "none";
       myId = null;
-      keyInput.readOnly = true;
-  keyInput.style.display = "none";
-  roomBox.style.display = "block";
-  currentRoom = null;
-      resetConnectionUI();
-      setStatus("DISCONNECTED");
+      roomKey = null;
+      mouseDown = false;
+
+      clearPlayers();
+      setGameActive(false);
+      setStatus("OFFLINE");
     };
+  }
+
+  function leaveRoom() {
+    mouseDown = false;
+    keys.w = keys.a = keys.s = keys.d = false;
+
+    closeSocket();
+
+    connected = false;
+    myId = null;
+    roomKey = null;
+    roomKeyInput.readOnly = false;
+    roomKeyInput.value = "";
+    roomKeyInput.removeAttribute("aria-label");
+
+    clearPlayers();
+
+    setGameActive(false);
+    setStatus("OFFLINE");
   }
 
   function sendInput() {
@@ -508,121 +957,255 @@
       !connected ||
       !ws ||
       ws.readyState !== WebSocket.OPEN ||
-      myId == null
+      !myId
     ) return;
 
     const me = players[myId];
     if (!me) return;
 
-    let dx = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
-    let dy = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
+    const input = {
+      w: !!keys.w,
+      a: !!keys.a,
+      s: !!keys.s,
+      d: !!keys.d,
+      shooting: !!mouseDown
+    };
 
-    if (dx || dy) {
-      const length = Math.hypot(dx, dy);
-      dx /= length;
-      dy /= length;
+    const target = screenToWorld(mouseX, mouseY);
 
-      const speed = 3.8;
-      me.x += dx * speed;
-      me.y += dy * speed;
-      me.targetX = me.x;
-      me.targetY = me.y;
-
-      me.x = Math.max(22, Math.min(W - 22, me.x));
-      me.y = Math.max(22, Math.min(H - 22, me.y));
-      me.targetX = me.x;
-      me.targetY = me.y;
-    }
-
-    me.angle = Math.atan2(mouseY - me.y, mouseX - me.x);
-    me.targetAngle = me.angle;
+    const angle = Math.atan2(
+      target.y - me.y,
+      target.x - me.x
+    );
 
     try {
       ws.send(JSON.stringify({
         type: "input",
-        input: {
-          w: !!keys.w,
-          a: !!keys.a,
-          s: !!keys.s,
-          d: !!keys.d,
-          shooting: mouseDown
-        },
-        angle: me.angle,
-        class: me.class
+        input,
+        angle,
+        class: selectedClass || me.class || "assaulter"
       }));
     } catch {
       setStatus("SEND FAILED");
     }
   }
 
-  function lerpAngle(from, to, amount) {
-    let diff = (to - from + Math.PI) % (Math.PI * 2) - Math.PI;
-    return from + diff * amount;
+  function chooseClass(className) {
+    if (!CLASSES[className] || !connected) return;
+
+    selectedClass = className;
+    updateHud();
+    sendInput();
+  }
+
+  function buyUpgrade(upgrade) {
+    if (!connected || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    try {
+      ws.send(JSON.stringify({
+        type: "upgrade",
+        upgrade
+      }));
+    } catch {}
+  }
+
+  function lerpAngle(a, b, amount) {
+    let diff = (b - a + Math.PI) % (Math.PI * 2) - Math.PI;
+    return a + diff * amount;
   }
 
   function updatePlayers() {
-    Object.values(players).forEach(player => {
-      if (player.id === myId) return;
+    for (const p of Object.values(players)) {
+      if (p.id === myId) {
+        // Local player follows authoritative server state without camera movement.
+        p.x += (p.targetX - p.x) * 0.30;
+        p.y += (p.targetY - p.y) * 0.30;
+      } else {
+        p.x += (p.targetX - p.x) * 0.22;
+        p.y += (p.targetY - p.y) * 0.22;
+      }
 
-      player.x += (player.targetX - player.x) * 0.22;
-      player.y += (player.targetY - player.y) * 0.22;
-      player.angle = lerpAngle(
-        player.angle,
-        player.targetAngle,
-        0.22
-      );
-    });
+      p.angle = lerpAngle(p.angle, p.targetAngle, 0.25);
+    }
   }
 
-  function drawPlayer(player, index) {
-    if (!player) return;
+  function drawMap() {
+    const v = worldViewport();
 
-    const x = Number.isFinite(player.x) ? player.x : W / 2;
-    const y = Number.isFinite(player.y) ? player.y : H / 2;
-    const angle = Number.isFinite(player.angle) ? player.angle : 0;
-    const bodyColor = palette[index % palette.length];
+    // Very subtle map framing only. No opaque game background is added.
+    ctx.save();
+
+    ctx.beginPath();
+    ctx.rect(v.x, v.y, v.w, v.h);
+    ctx.clip();
+
+    // Subtle grid that blends into the existing dashboard.
+    ctx.strokeStyle = "rgba(255,255,255,.045)";
+    ctx.lineWidth = 1;
+
+    const grid = 250;
+
+    for (let x = 0; x <= WORLD_WIDTH; x += grid) {
+      const sx = v.x + x * v.scale;
+      ctx.beginPath();
+      ctx.moveTo(sx, v.y);
+      ctx.lineTo(sx, v.y + v.h);
+      ctx.stroke();
+    }
+
+    for (let y = 0; y <= WORLD_HEIGHT; y += grid) {
+      const sy = v.y + y * v.scale;
+      ctx.beginPath();
+      ctx.moveTo(v.x, sy);
+      ctx.lineTo(v.x + v.w, sy);
+      ctx.stroke();
+    }
+
+    // Random server-generated AUX blocks.
+    for (const ob of worldMap) {
+      if (!ob) continue;
+
+      const sx = v.x + Number(ob.x || 0) * v.scale;
+      const sy = v.y + Number(ob.y || 0) * v.scale;
+      const sw = Math.max(4, Number(ob.w || 100) * v.scale);
+      const sh = Math.max(4, Number(ob.h || 80) * v.scale);
+
+      ctx.fillStyle = "rgba(30,33,43,.34)";
+      ctx.strokeStyle = "rgba(232,200,120,.22)";
+      ctx.lineWidth = 1;
+
+      ctx.fillRect(sx, sy, sw, sh);
+      ctx.strokeRect(sx, sy, sw, sh);
+
+      ctx.fillStyle = "rgba(232,200,120,.40)";
+      ctx.font = `${Math.max(6, Math.min(10, sw / 13))}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        ob.label || "AUX",
+        sx + sw / 2,
+        sy + sh / 2
+      );
+    }
+
+    ctx.restore();
+  }
+
+  function drawProjectile(projectile) {
+    const v = worldViewport();
+
+    const p = worldToScreen(
+      Number(projectile.x || 0),
+      Number(projectile.y || 0)
+    );
+
+    const size = Math.max(2.5, 7 * v.scale + 2);
 
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
+    ctx.translate(p.x, p.y);
+    ctx.rotate(Number(projectile.angle || 0));
 
-    ctx.fillStyle = "rgba(0,0,0,.3)";
+    // Neon-white projectile core + glow.
+    ctx.shadowColor = "rgba(255,255,255,.98)";
+    ctx.shadowBlur = Math.max(7, size * 3.5);
+
+    if (projectile.type === "rpg") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-size * 1.8, -size * .45, size * 3.6, size * .9);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(size * 1.2, -size * .35, size * .8, size * .7);
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(0, 0, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.shadowBlur = Math.max(2, size);
+    ctx.fillStyle = "#ffffff";
+    ctx.restore();
+  }
+
+  function drawPlayer(p, index) {
+    if (!p) return;
+
+    const pos = worldToScreen(p.x, p.y);
+
+    // If the fitted map is tiny on a very large screen, keep soldiers readable.
+    const radius = Math.max(6, Math.min(13, 16 * worldViewport().scale * 2.2));
+    const bodyColor =
+      p.id === myId
+        ? "#42b982"
+        : (CLASSES[p.class]?.color || palette[index % palette.length]);
+
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(p.angle || 0);
+
+    // Shadow
+    ctx.fillStyle = "rgba(0,0,0,.24)";
     ctx.beginPath();
-    ctx.ellipse(0, 11, 14, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, radius * .85, radius * .9, radius * .42, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    // Body
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(-10, -13, 20, 26);
+    ctx.fillRect(-radius * .62, -radius, radius * 1.24, radius * 2);
 
-    ctx.fillStyle = "#202126";
-    ctx.fillRect(4, -3, 23, 5);
+    // Weapon
+    ctx.fillStyle = "#17191f";
+    ctx.fillRect(radius * .25, -radius * .16, radius * 1.7, Math.max(2, radius * .28));
 
-    if (!player.alive) {
-      ctx.globalAlpha = 0.35;
+    // Class indicator
+    ctx.fillStyle = "rgba(255,255,255,.75)";
+    ctx.fillRect(-radius * .15, -radius * .62, radius * .3, radius * .3);
+
+    if (!p.alive) {
+      ctx.globalAlpha = .32;
       ctx.fillStyle = "#000";
-      ctx.fillRect(-12, -15, 24, 30);
+      ctx.fillRect(-radius * .8, -radius * 1.15, radius * 1.6, radius * 2.3);
     }
 
     ctx.restore();
 
+    // HP bar
     const hp = Math.max(
       0,
-      Math.min(1, (player.hp ?? 100) / (player.maxHp || 100))
+      Math.min(1, Number(p.hp || 0) / Math.max(1, Number(p.maxHp || 100)))
     );
 
-    ctx.fillStyle = "rgba(0,0,0,.7)";
-    ctx.fillRect(x - 20, y - 28, 40, 3);
+    const barW = Math.max(24, radius * 3);
+    const barH = 3;
+
+    ctx.fillStyle = "rgba(0,0,0,.65)";
+    ctx.fillRect(
+      pos.x - barW / 2,
+      pos.y - radius - 10,
+      barW,
+      barH
+    );
 
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(x - 20, y - 28, 40 * hp, 3);
+    ctx.fillRect(
+      pos.x - barW / 2,
+      pos.y - radius - 10,
+      barW * hp,
+      barH
+    );
 
-    ctx.font = "9px Arial";
+    // Name
+    ctx.font = "8px Arial";
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,.88)";
+    ctx.textBaseline = "top";
+    ctx.fillStyle =
+      p.id === myId
+        ? "rgba(66,185,130,.95)"
+        : "rgba(255,255,255,.72)";
+
     ctx.fillText(
-      player.id === myId ? "YOU" : (player.name || "PLAYER"),
-      x,
-      y + 25
+      p.id === myId ? "YOU" : (p.name || "PLAYER"),
+      pos.x,
+      pos.y + radius + 5
     );
   }
 
@@ -630,43 +1213,78 @@
     if (destroyed) return;
 
     ctx.clearRect(0, 0, W, H);
-    updatePlayers();
 
     if (connected) {
-      Object.values(players).forEach((player, index) => {
-        drawPlayer(player, index);
-      });
+      updatePlayers();
+      drawMap();
+
+      for (const projectile of worldProjectiles) {
+        drawProjectile(projectile);
+      }
+
+      Object.values(players).forEach(drawPlayer);
     }
 
     animationId = requestAnimationFrame(draw);
   }
 
-  function leave() {
-    closeSocket();
-    connected = false;
-    controlsHelp.style.display = "none";
-    myId = null;
-    keyInput.readOnly = true;
-  keyInput.style.display = "none";
-  roomBox.style.display = "block";
-  currentRoom = null;
-    mouseDown = false;
-    clearPlayers();
-    resetConnectionUI();
-    setStatus("OFFLINE");
+  function onRoomKeyInput() {
+    // Do not block typing: every A-Z and 0-9 character is accepted.
+    // Hyphens are also accepted.
+    roomKeyInput.value = roomKeyInput.value
+      .toUpperCase()
+      .replace(/[^A-Z0-9-]/g, "")
+      .slice(0, 32);
+  }
+
+  function onRoomKeyKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      joinRoom();
+    }
   }
 
   function onKeyDown(event) {
+    if (!connected) return;
+
+    const target = event.target;
+    const typing =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target?.isContentEditable;
+
+    if (typing) return;
+
     const key = event.key.toLowerCase();
-    keys[key] = true;
 
     if (["w", "a", "s", "d"].includes(key)) {
+      keys[key] = true;
+      event.preventDefault();
+      return;
+    }
+
+    if (key === "r") {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "reload" }));
+      }
+      event.preventDefault();
+      return;
+    }
+
+    const classByKey = { "1": "assaulter", "2": "sniper", "3": "rpg", "4": "shotgun" };
+    if (classByKey[key]) {
+      chooseClass(classByKey[key]);
       event.preventDefault();
     }
   }
 
   function onKeyUp(event) {
-    keys[event.key.toLowerCase()] = false;
+    const key = event.key.toLowerCase();
+
+    if (["w", "a", "s", "d"].includes(key)) {
+      keys[key] = false;
+      if (connected) event.preventDefault();
+    }
   }
 
   function onMouseMove(event) {
@@ -675,47 +1293,118 @@
   }
 
   function onMouseDown(event) {
-    if (
-      event.button === 0 &&
-      !event.target.closest("input") &&
-      !event.target.closest("button")
-    ) {
+    if (!connected || !root.classList.contains("game-active")) return;
+
+    // Do not turn HUD/class controls into shooting clicks.
+    if (event.target.closest("#rs-hud") ||
+        event.target.closest("#rs-class") ||
+        event.target.closest("#rs-controls")) {
+      return;
+    }
+
+    if (event.button === 0) {
       mouseDown = true;
+      event.preventDefault();
     }
   }
 
   function onMouseUp(event) {
-    if (event.button === 0) mouseDown = false;
+    if (event.button === 0) {
+      mouseDown = false;
+    }
   }
 
-  function onKeyInput() {
-    keyInput.value = keyInput.value
-      .toUpperCase()
-      .replace(/[^A-Z0-9-]/g, "");
+  function onBlur() {
+    mouseDown = false;
+    keys.w = keys.a = keys.s = keys.d = false;
   }
 
-  joinButton.addEventListener("click", connect);
-  leaveButton.addEventListener("click", leave);
-  keyInput.addEventListener("input", onKeyInput);
+  joinButton.addEventListener("click", joinRoom);
+  leaveButton.addEventListener("click", leaveRoom);
+
+  roomKeyInput.addEventListener("input", onRoomKeyInput);
+  roomKeyInput.addEventListener("keydown", onRoomKeyKeyDown);
+
+  root.querySelectorAll(".rs-class-button").forEach(btn => {
+    btn.addEventListener("click", event => {
+      event.preventDefault();
+      chooseClass(btn.dataset.class);
+    });
+  });
+
+  root.querySelectorAll(".rs-upgrade").forEach(btn => {
+    btn.addEventListener("click", event => {
+      event.preventDefault();
+      buyUpgrade(btn.dataset.upgrade);
+    });
+  });
 
   window.addEventListener("resize", resize);
-  window.addEventListener("keydown", onKeyDown, true);
-  window.addEventListener("keyup", onKeyUp, true);
+  window.addEventListener("blur", onBlur);
 
-  canvas.addEventListener("mousedown", e => {
-    if (!connected || e.button !== 0) return;
-    mouseDown = true;
-    e.preventDefault();
-  }, true);
-  window.addEventListener("mouseup", e => { if(e.button===0) mouseDown=false; }, true);
-  canvas.addEventListener("mousemove", e => { mouseX=e.clientX; mouseY=e.clientY; }, true);
+  // Capture only after the game is active.
   document.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("keyup", onKeyUp, true);
-  document.addEventListener("mousemove", onMouseMove);
-  document.addEventListener("mousedown", onMouseDown);
-  document.addEventListener("mouseup", onMouseUp);
+  document.addEventListener("mousemove", onMouseMove, true);
+  document.addEventListener("mousedown", onMouseDown, true);
+  document.addEventListener("mouseup", onMouseUp, true);
+
+  // Canvas-level handlers make LMB shooting reliable even when the Riot page
+  // or another overlay also has mouse handlers.
+  canvas.addEventListener("mousedown", event => {
+    if (!connected || event.button !== 0) return;
+    mouseX = event.clientX;
+    mouseY = event.clientY;
+    mouseDown = true;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  canvas.addEventListener("mouseup", event => {
+    if (event.button === 0) {
+      mouseDown = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+  canvas.addEventListener("contextmenu", event => event.preventDefault());
+
+  /*
+   * Because the root is pointer-events:none before joining, the small
+   * controls would also be unreachable. Put a transparent event shield
+   * behind the controls only while disconnected.
+   */
+  root.style.pointerEvents = "none";
+  root.querySelector("#rs-controls").style.pointerEvents = "auto";
+
+  // When joined, the entire transparent overlay captures the page.
+  // When disconnected, only the room controls can be clicked.
+  const originalSetGameActive = setGameActive;
+  setGameActive = function(active) {
+    root.classList.toggle("game-active", active);
+
+    roomEl.style.display = active ? "block" : "none";
+    playersEl.style.display = active ? "block" : "none";
+    hudEl.style.display = active ? "block" : "none";
+    classEl.style.display = active ? "block" : "none";
+
+    leaveButton.style.display = active ? "inline-block" : "none";
+    joinButton.style.display = active ? "none" : "inline-block";
+
+    if (active) {
+      root.style.pointerEvents = "auto";
+      canvas.style.pointerEvents = "auto";
+      root.querySelector("#rs-controls").style.pointerEvents = "auto";
+    } else {
+      root.style.pointerEvents = "none";
+      canvas.style.pointerEvents = "none";
+      root.querySelector("#rs-controls").style.pointerEvents = "auto";
+    }
+
+    updateHud();
+  };
 
   resize();
+  setGameActive(false);
 
   inputTimer = window.setInterval(() => {
     if (connected) sendInput();
@@ -723,29 +1412,35 @@
 
   window.__riotSoldierCleanup = () => {
     destroyed = true;
+
     cancelAnimationFrame(animationId);
     clearInterval(inputTimer);
+    clearTimeout(auxPopupTimer);
+    clearTimeout(killNoteTimer);
 
     window.removeEventListener("resize", resize);
-    window.removeEventListener("keydown", onKeyDown, true);
-    window.removeEventListener("keyup", onKeyUp, true);
+    window.removeEventListener("blur", onBlur);
+
     document.removeEventListener("keydown", onKeyDown, true);
     document.removeEventListener("keyup", onKeyUp, true);
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mousedown", onMouseDown);
-    document.removeEventListener("mouseup", onMouseUp);
+    document.removeEventListener("mousemove", onMouseMove, true);
+    document.removeEventListener("mousedown", onMouseDown, true);
+    document.removeEventListener("mouseup", onMouseUp, true);
 
     closeSocket();
     root.remove();
+
     delete window.__riotSoldierCleanup;
   };
 
   console.log(
-    "%cRIOT SOLDIER | 10 PLAYER INTERNET MULTIPLAYER READY",
-    "color:#e94560;font-weight:bold;font-size:14px"
+    "%cRIOT SOLDIER%c overlay client ready",
+    "color:#e3485c;font-weight:900",
+    "color:inherit;font-weight:700"
   );
   console.log(
-    "Enter your VM WebSocket address and room key, then click JOIN ROOM."
+    "Room server:",
+    SERVER_URL
   );
 
   draw();
