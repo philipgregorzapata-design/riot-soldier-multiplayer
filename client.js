@@ -522,23 +522,21 @@
   }
 
   /*
-   * The Riot page is the visible game viewport.
-   * The 5000x5000 server world is larger than the browser, so the camera
-   * follows the local player instead of shrinking the entire map into a
-   * tiny square. This keeps the map and soldiers visible and lets the
-   * world move naturally while staying inside the page border.
+   * STATIC TOP-DOWN WORLD VIEW
+   * The entire server world is fitted into the current browser viewport.
+   * There is intentionally NO player-follow camera: every player remains
+   * visible and the map always occupies the available page area.
    */
   function worldViewport() {
-    const scale = Math.max(0.72, Math.min(1.15, Math.min(W / 1200, H / 800)));
-    const me = myId ? players[myId] : null;
-    const camX = me ? Number(me.x || WORLD_WIDTH / 2) : WORLD_WIDTH / 2;
-    const camY = me ? Number(me.y || WORLD_HEIGHT / 2) : WORLD_HEIGHT / 2;
+    const scale = Math.min(W / WORLD_WIDTH, H / WORLD_HEIGHT);
+    const worldW = WORLD_WIDTH * scale;
+    const worldH = WORLD_HEIGHT * scale;
 
     return {
-      x: W / 2 - camX * scale,
-      y: H / 2 - camY * scale,
-      w: WORLD_WIDTH * scale,
-      h: WORLD_HEIGHT * scale,
+      x: (W - worldW) / 2,
+      y: (H - worldH) / 2,
+      w: worldW,
+      h: worldH,
       scale
     };
   }
