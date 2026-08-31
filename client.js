@@ -3,22 +3,48 @@
 
   /*
    * RIOT SOLDIER MULTIPLAYER
-   * Client for the Cloudflare Worker server.
+   * Transparent overlay client
    *
-   * Controls:
-   *   W A S D  = movement
-   *   Mouse    = aim
-   *   LMB      = fire
-   *
-   * Classes:
-   *   ASSAULTER = hold LMB, rapid fire
-   *   SNIPER    = one click / one shot
-   *   RPG       = one click / missile / explosion
-   *   SHOTGUN   = one click / spread
+   * Behavior:
+   * - Existing Riot page remains visible underneath.
+   * - Before joining, only the small room controls are interactive.
+   * - After joining, the game captures the page.
+   * - No scrolling/camera movement.
+   * - The complete game world is fitted inside the browser viewport.
+   * - Room key accepts letters, numbers and hyphens.
+   * - Class selector is bottom-left.
    */
 
-  window.__riotSoldierCleanup?.();
+  // Remove an older copy if this script was already loaded.
+  if (window.__riotSoldierCleanup) {
+    try {
+      window.__riotSoldierCleanup();
+    } catch (e) {}
+  }
+
   document.getElementById("riot-soldier-battle")?.remove();
+
+  const SERVER_URL =
+    "wss://riot-soldier-multiplayer.philipgregorzapata.workers.dev/ws";
+
+  const WORLD_WIDTH = 5000;
+  const WORLD_HEIGHT = 5000;
+  const MAX_PLAYERS = 10;
+
+  const CLASSES = {
+    assaulter: {
+      label: "ASSAULTER"
+    },
+    sniper: {
+      label: "SNIPER"
+    },
+    rpg: {
+      label: "RPG"
+    },
+    shotgun: {
+      label: "SHOTGUN"
+    }
+  };
 
   const root = document.createElement("div");
   root.id = "riot-soldier-battle";
@@ -30,12 +56,10 @@
         inset: 0;
         width: 100vw;
         height: 100vh;
-        z-index: 999999;
+        z-index: 2147483000;
         overflow: hidden;
-        font-family: Arial, Helvetica, sans-serif;
-        color: #fff;
         pointer-events: none;
-        user-select: none;
+        font-family: Arial, Helvetica, sans-serif;
       }
 
       #riot-soldier-canvas {
@@ -44,473 +68,456 @@
         width: 100%;
         height: 100%;
         display: block;
+        background: transparent;
         pointer-events: none;
       }
 
-      .riot-panel {
-        background: rgba(10, 13, 20, .88);
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 9px;
-        box-shadow: 0 8px 28px rgba(0,0,0,.35);
-        backdrop-filter: blur(8px);
-      }
-
-      #riot-soldier-controls {
-        position: fixed;
-        left: 14px;
-        bottom: 46px;
-        z-index: 1000001;
-        width: 220px;
-        display: flex;
-        flex-direction: column;
-        gap: 7px;
+      #riot-soldier-battle.game-active #riot-soldier-canvas {
         pointer-events: auto;
+        cursor: crosshair;
       }
 
-      #riot-soldier-room-controls {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 9px;
-      }
-
-      .riot-label {
-        font-size: 9px;
-        font-weight: 800;
-        letter-spacing: 1.2px;
-        opacity: .72;
-      }
-
-      .riot-input {
+      .rs-ui {
         box-sizing: border-box;
-        width: 100%;
-        height: 31px;
-        padding: 5px 8px;
-        border-radius: 6px;
-        border: 1px solid rgba(255,255,255,.14);
-        outline: none;
-        background: #171b25;
-        color: #fff;
-        font-size: 11px;
-        user-select: text;
+        color: rgba(255,255,255,.92);
+        background: rgba(18,20,29,.72);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 5px 20px rgba(0,0,0,.18);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
       }
 
-      .riot-input:focus {
-        border-color: rgba(255,73,101,.8);
-      }
+      /* =========================
+         ROOM CONTROLS
+         ========================= */
 
-      #riot-soldier-key {
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        font-weight: 800;
-      }
-
-      .riot-buttons {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px;
-      }
-
-      .riot-button {
-        height: 30px;
-        border: 1px solid rgba(255,255,255,.13);
-        border-radius: 6px;
-        background: #171b25;
-        color: #fff;
-        cursor: pointer;
-        font-size: 9px;
-        font-weight: 900;
-        letter-spacing: 1px;
-      }
-
-      .riot-button:hover {
-        background: #292e3b;
-      }
-
-      .riot-button:active {
-        transform: translateY(1px);
-      }
-
-      #riot-soldier-join {
-        background: rgba(211,48,75,.75);
-      }
-
-      #riot-soldier-join:hover {
-        background: rgba(230,58,85,.95);
-      }
-
-      #riot-soldier-room {
+      #rs-controls {
         position: fixed;
         left: 14px;
-        bottom: 375px;
-        z-index: 1000001;
-        min-width: 205px;
-        padding: 8px 10px;
-        display: none;
-        pointer-events: none;
-      }
-
-      #riot-soldier-room-key {
-        color: #ff536c;
-        font-size: 13px;
-        letter-spacing: 2px;
-        font-weight: 900;
-      }
-
-      #riot-soldier-status {
-        position: fixed;
-        right: 12px;
-        bottom: 10px;
-        z-index: 1000001;
-        padding: 5px 8px;
-        min-width: 92px;
-        text-align: center;
-        font-size: 8px;
-        font-weight: 900;
-        letter-spacing: 1px;
-        pointer-events: none;
-      }
-
-      #riot-soldier-player-list {
-        position: fixed;
-        left: 12px;
-        top: 12px;
-        z-index: 1000001;
-        width: 175px;
-        padding: 9px 10px;
-        display: none;
-        pointer-events: none;
-      }
-
-      #riot-soldier-player-title {
-        font-size: 9px;
-        font-weight: 900;
-        letter-spacing: 1.5px;
-        margin-bottom: 6px;
-      }
-
-      .riot-player-row {
+        bottom: 14px;
+        z-index: 50;
         display: flex;
-        align-items: center;
-        justify-content: space-between;
+        flex-direction: column;
+        align-items: flex-start;
         gap: 6px;
-        padding: 3px 0;
+        pointer-events: auto;
+      }
+
+      #rs-room-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      #rs-room-key {
+        width: 142px;
+        height: 30px;
+        box-sizing: border-box;
+        padding: 0 9px;
+        border-radius: 6px;
+        outline: none;
+        border: 1px solid rgba(255,255,255,.13);
+        background: rgba(12,14,21,.78);
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-size: 11px;
+        font-weight: 700;
+        pointer-events: auto;
+      }
+
+      #rs-room-key::placeholder {
+        color: rgba(255,255,255,.38);
+      }
+
+      #rs-room-key:focus {
+        border-color: rgba(227,72,92,.75);
+      }
+
+      .rs-row {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+
+      .rs-button {
+        height: 29px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(18,21,30,.82);
+        color: rgba(255,255,255,.92);
         font-size: 9px;
-        color: rgba(255,255,255,.72);
+        font-weight: 800;
+        letter-spacing: .8px;
+        cursor: pointer;
       }
 
-      .riot-player-row.you {
-        color: #65e0a2;
+      .rs-button:hover {
+        background: rgba(215,48,76,.82);
       }
 
-      .riot-player-class {
-        opacity: .5;
+      #rs-leave {
+        display: none;
+      }
+
+      #rs-status {
+        padding: 5px 8px;
+        border-radius: 5px;
         font-size: 8px;
+        font-weight: 800;
+        letter-spacing: .7px;
+        color: rgba(255,255,255,.70);
+        white-space: nowrap;
       }
 
-      #riot-soldier-player-count {
+      /* =========================
+         ROOM LABEL
+         ========================= */
+
+      #rs-room {
+        display: none;
         position: fixed;
-        right: 12px;
         top: 12px;
-        z-index: 1000001;
-        padding: 6px 8px;
-        font-size: 8px;
-        font-weight: 900;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 50;
+        padding: 5px 9px;
+        border-radius: 5px;
+        font-size: 9px;
+        font-weight: 800;
         letter-spacing: 1px;
         pointer-events: none;
       }
 
-      #riot-soldier-hud {
-        position: fixed;
-        left: 50%;
-        bottom: 12px;
-        transform: translateX(-50%);
-        z-index: 1000001;
-        min-width: 270px;
-        padding: 8px 12px;
-        text-align: center;
-        pointer-events: none;
+      #rs-room span {
+        color: #ff4965;
       }
 
-      #riot-soldier-class-name {
-        font-size: 11px;
-        font-weight: 900;
-        letter-spacing: 2px;
-      }
+      /* =========================
+         PLAYER LIST
+         ========================= */
 
-      #riot-soldier-hp {
-        margin-top: 5px;
-        height: 5px;
-        border-radius: 4px;
-        overflow: hidden;
-        background: rgba(255,255,255,.12);
-      }
-
-      #riot-soldier-hp-fill {
-        width: 100%;
-        height: 100%;
-        background: #52d58b;
-        transition: width .12s linear;
-      }
-
-      #riot-soldier-aux {
-        margin-top: 5px;
-        color: #ffd45a;
-        font-size: 10px;
-        font-weight: 900;
-      }
-
-      #riot-soldier-upgrades {
-        position: fixed;
-        right: 12px;
-        bottom: 42px;
-        z-index: 1000001;
-        width: 185px;
-        padding: 9px;
+      #rs-players {
         display: none;
-        pointer-events: auto;
-      }
-
-      .riot-upgrade-title {
-        font-size: 9px;
-        font-weight: 900;
-        letter-spacing: 1.4px;
-        margin-bottom: 7px;
-      }
-
-      .riot-upgrade {
-        width: 100%;
-        height: 29px;
-        margin-top: 5px;
-        border: 1px solid rgba(255,255,255,.11);
-        border-radius: 6px;
-        background: #171b25;
-        color: #fff;
-        text-align: left;
-        padding: 0 8px;
-        font-size: 8px;
-        font-weight: 900;
-        cursor: pointer;
-      }
-
-      .riot-upgrade:hover {
-        background: #282e3a;
-      }
-
-      .riot-upgrade span {
-        float: right;
-        color: #ffd45a;
-      }
-
-      #riot-soldier-class-panel {
-        position: fixed;
-        left: 50%;
-        top: 12px;
-        transform: translateX(-50%);
-        z-index: 1000001;
-        display: none;
-        padding: 7px;
-        gap: 5px;
-        pointer-events: auto;
-      }
-
-      .riot-class-button {
-        border: 1px solid rgba(255,255,255,.11);
-        border-radius: 6px;
-        padding: 6px 8px;
-        background: #171b25;
-        color: rgba(255,255,255,.75);
-        cursor: pointer;
-        font-size: 8px;
-        font-weight: 900;
-        letter-spacing: .7px;
-      }
-
-      .riot-class-button.active {
-        color: #fff;
-        background: rgba(211,48,75,.78);
-        border-color: rgba(255,83,108,.8);
-      }
-
-      #riot-soldier-kill-feed {
         position: fixed;
         left: 14px;
-        top: 205px;
-        z-index: 1000001;
+        top: 14px;
+        z-index: 50;
+        width: 150px;
+        padding: 8px 9px;
+        border-radius: 7px;
         pointer-events: none;
       }
 
-      .riot-feed {
-        margin-top: 4px;
-        color: #ffd45a;
-        font-size: 10px;
+      #rs-players-title {
+        color: rgba(255,255,255,.90);
+        font-size: 8px;
         font-weight: 900;
-        text-shadow: 0 1px 5px #000;
-        animation: riotFade 2.5s forwards;
+        letter-spacing: 1.2px;
+        margin-bottom: 5px;
       }
 
-      @keyframes riotFade {
-        0% {
-          opacity: 1;
-          transform: translateX(0);
-        }
-        70% {
-          opacity: 1;
-        }
-        100% {
-          opacity: 0;
-          transform: translateX(12px);
-        }
+      .rs-player {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 0;
+        font-size: 8px;
+        color: rgba(255,255,255,.62);
       }
 
-      #riot-soldier-help {
+      .rs-player.you {
+        color: #42b982;
+      }
+
+      /* =========================
+         HUD
+         ========================= */
+
+      #rs-hud {
+        display: none;
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        z-index: 50;
+        min-width: 175px;
+        padding: 8px 10px;
+        border-radius: 7px;
+        pointer-events: auto;
+      }
+
+      #rs-hud-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      #rs-class-label {
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1px;
+      }
+
+      #rs-aux {
+        color: #e8c878;
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      #rs-kill-note {
+        margin-top: 3px;
+        min-height: 10px;
+        color: rgba(255,255,255,.68);
+        font-size: 8px;
+        font-weight: 700;
+      }
+
+      #rs-upgrades {
+        display: flex;
+        gap: 4px;
+        margin-top: 6px;
+      }
+
+      .rs-upgrade {
+        flex: 1;
+        padding: 5px 4px;
+        border-radius: 5px;
+        border: 1px solid rgba(255,255,255,.09);
+        background: rgba(0,0,0,.20);
+        color: rgba(255,255,255,.76);
+        font-size: 7px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .rs-upgrade:hover {
+        background: rgba(255,255,255,.10);
+      }
+
+      /* =========================
+         CLASS SELECTOR
+         ========================= */
+
+      #rs-class {
+        display: none;
+        position: fixed;
+        left: 14px;
+        bottom: 83px;
+        z-index: 50;
+        pointer-events: auto;
+      }
+
+      #rs-class-title {
+        margin-bottom: 4px;
+        color: rgba(255,255,255,.58);
+        font-size: 7px;
+        font-weight: 900;
+        letter-spacing: 1.1px;
+      }
+
+      #rs-class-buttons {
+        display: flex;
+        gap: 4px;
+      }
+
+      .rs-class-button {
+        padding: 6px 7px;
+        border-radius: 5px;
+        border: 1px solid rgba(255,255,255,.09);
+        background: rgba(18,20,29,.72);
+        color: rgba(255,255,255,.68);
+        font-size: 7px;
+        font-weight: 900;
+        letter-spacing: .4px;
+        cursor: pointer;
+      }
+
+      .rs-class-button:hover,
+      .rs-class-button.active {
+        color: #fff;
+        border-color: rgba(227,72,92,.65);
+        background: rgba(227,72,92,.28);
+      }
+
+      /* =========================
+         AUX POPUP
+         ========================= */
+
+      #rs-aux-popup {
+        position: fixed;
+        left: 14px;
+        bottom: 126px;
+        z-index: 50;
+        display: none;
+        padding: 4px 7px;
+        border-radius: 5px;
+        color: #e8c878;
+        background: rgba(18,20,29,.68);
+        border: 1px solid rgba(232,200,120,.18);
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: .5px;
+        pointer-events: none;
+      }
+
+      #rs-respawn {
+        display: none;
         position: fixed;
         left: 50%;
         top: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 1000000;
-        color: rgba(255,255,255,.45);
+        transform: translate(-50%,-50%);
+        z-index: 50;
+        padding: 7px 10px;
+        border-radius: 6px;
         font-size: 9px;
+        font-weight: 900;
         letter-spacing: 1px;
         pointer-events: none;
-        text-align: center;
       }
 
       @media (max-width: 700px) {
-        #riot-soldier-controls {
-          width: 180px;
+        #rs-players {
+          width: 125px;
         }
 
-        #riot-soldier-player-list {
-          width: 140px;
+        #rs-hud {
+          min-width: 145px;
         }
 
-        #riot-soldier-upgrades {
-          width: 155px;
-        }
-
-        .riot-class-button {
-          padding: 5px;
-          font-size: 7px;
+        .rs-class-button {
+          padding: 5px 5px;
+          font-size: 6px;
         }
       }
     </style>
 
     <canvas id="riot-soldier-canvas"></canvas>
 
-    <div id="riot-soldier-controls" class="riot-panel">
-      <div id="riot-soldier-room-controls">
-        <div class="riot-label">SERVER</div>
+    <div id="rs-controls">
+      <div id="rs-room-controls">
 
         <input
-          id="riot-soldier-server"
-          class="riot-input"
-          value="wss://riot-soldier-multiplayer.philipgregorzapata.workers.dev/ws"
-          placeholder="wss://your-worker.workers.dev/ws"
-          autocomplete="off"
-          spellcheck="false"
-        >
-
-        <div class="riot-label">ROOM KEY</div>
-
-        <input
-          id="riot-soldier-key"
-          class="riot-input"
-          placeholder="ROOM123"
+          id="rs-room-key"
           maxlength="32"
           autocomplete="off"
           spellcheck="false"
+          placeholder="ROOM KEY"
         >
 
-        <div class="riot-buttons">
-          <button id="riot-soldier-join" class="riot-button">
+        <div class="rs-row">
+          <button id="rs-join" class="rs-button">
             JOIN ROOM
           </button>
 
-          <button id="riot-soldier-leave" class="riot-button">
+          <button id="rs-leave" class="rs-button">
             LEAVE
           </button>
+
+          <div id="rs-status" class="rs-ui">
+            OFFLINE
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="rs-room" class="rs-ui">
+      ROOM: <span id="rs-room-value"></span>
+    </div>
+
+    <div id="rs-players" class="rs-ui">
+      <div id="rs-players-title">
+        PLAYERS <span id="rs-count">0/10</span>
+      </div>
+
+      <div id="rs-player-list"></div>
+    </div>
+
+    <div id="rs-hud" class="rs-ui">
+
+      <div id="rs-hud-top">
+        <div id="rs-class-label">
+          ASSAULTER
+        </div>
+
+        <div id="rs-aux">
+          AUX 0
         </div>
       </div>
-    </div>
 
-    <div id="riot-soldier-room" class="riot-panel">
-      ROOM:
-      <span id="riot-soldier-room-key"></span>
-    </div>
+      <div id="rs-kill-note"></div>
 
-    <div id="riot-soldier-status" class="riot-panel">
-      OFFLINE
-    </div>
+      <div id="rs-upgrades">
 
-    <div id="riot-soldier-player-list" class="riot-panel">
-      <div id="riot-soldier-player-title">PLAYERS</div>
-      <div id="riot-soldier-players"></div>
-    </div>
+        <button
+          class="rs-upgrade"
+          data-upgrade="reload"
+        >
+          RELOAD<br>LV 0
+        </button>
 
-    <div id="riot-soldier-player-count" class="riot-panel">
-      PLAYERS: 0 / 10
-    </div>
+        <button
+          class="rs-upgrade"
+          data-upgrade="fire"
+        >
+          FIRE<br>LV 0
+        </button>
 
-    <div id="riot-soldier-class-panel" class="riot-panel">
-      <button class="riot-class-button active" data-class="assaulter">
-        ASSAULTER
-      </button>
+        <button
+          class="rs-upgrade"
+          data-upgrade="move"
+        >
+          MOVE<br>LV 0
+        </button>
 
-      <button class="riot-class-button" data-class="sniper">
-        SNIPER
-      </button>
-
-      <button class="riot-class-button" data-class="rpg">
-        RPG
-      </button>
-
-      <button class="riot-class-button" data-class="shotgun">
-        SHOTGUN
-      </button>
-    </div>
-
-    <div id="riot-soldier-upgrades" class="riot-panel">
-      <div class="riot-upgrade-title">
-        AUX UPGRADES
-      </div>
-
-      <button class="riot-upgrade" data-upgrade="reload">
-        RELOAD SPEED
-        <span id="riot-reload-level">LV 0</span>
-      </button>
-
-      <button class="riot-upgrade" data-upgrade="fire">
-        SHOOTING SPEED
-        <span id="riot-fire-level">LV 0</span>
-      </button>
-
-      <button class="riot-upgrade" data-upgrade="move">
-        MOVEMENT SPEED
-        <span id="riot-move-level">LV 0</span>
-      </button>
-    </div>
-
-    <div id="riot-soldier-hud" class="riot-panel">
-      <div id="riot-soldier-class-name">
-        ASSAULTER
-      </div>
-
-      <div id="riot-soldier-hp">
-        <div id="riot-soldier-hp-fill"></div>
-      </div>
-
-      <div id="riot-soldier-aux">
-        AUX: 0
       </div>
     </div>
 
-    <div id="riot-soldier-kill-feed"></div>
+    <div id="rs-class">
 
-    <div id="riot-soldier-help">
-      W A S D &nbsp; MOVE &nbsp; • &nbsp;
-      MOUSE &nbsp; AIM &nbsp; • &nbsp;
-      LMB &nbsp; FIRE
+      <div id="rs-class-title">
+        CLASS
+      </div>
+
+      <div id="rs-class-buttons">
+
+        <button
+          class="rs-class-button active"
+          data-class="assaulter"
+        >
+          ASSAULT
+        </button>
+
+        <button
+          class="rs-class-button"
+          data-class="sniper"
+        >
+          SNIPER
+        </button>
+
+        <button
+          class="rs-class-button"
+          data-class="rpg"
+        >
+          RPG
+        </button>
+
+        <button
+          class="rs-class-button"
+          data-class="shotgun"
+        >
+          SHOTGUN
+        </button>
+
+      </div>
+    </div>
+
+    <div id="rs-aux-popup"></div>
+
+    <div id="rs-respawn" class="rs-ui">
+      RESPAWNING...
     </div>
   `;
 
@@ -522,212 +529,109 @@
   const ctx =
     canvas.getContext("2d");
 
-  const serverInput =
-    root.querySelector("#riot-soldier-server");
-
-  const keyInput =
-    root.querySelector("#riot-soldier-key");
+  const roomKeyInput =
+    root.querySelector("#rs-room-key");
 
   const joinButton =
-    root.querySelector("#riot-soldier-join");
+    root.querySelector("#rs-join");
 
   const leaveButton =
-    root.querySelector("#riot-soldier-leave");
+    root.querySelector("#rs-leave");
 
-  const status =
-    root.querySelector("#riot-soldier-status");
+  const statusEl =
+    root.querySelector("#rs-status");
 
-  const roomBox =
-    root.querySelector("#riot-soldier-room");
+  const roomEl =
+    root.querySelector("#rs-room");
 
-  const roomKeyElement =
-    root.querySelector("#riot-soldier-room-key");
+  const roomValueEl =
+    root.querySelector("#rs-room-value");
 
-  const playerList =
-    root.querySelector("#riot-soldier-player-list");
+  const playersEl =
+    root.querySelector("#rs-players");
 
-  const playersElement =
-    root.querySelector("#riot-soldier-players");
+  const playerListEl =
+    root.querySelector("#rs-player-list");
 
-  const playerCount =
-    root.querySelector("#riot-soldier-player-count");
+  const countEl =
+    root.querySelector("#rs-count");
 
-  const classPanel =
-    root.querySelector("#riot-soldier-class-panel");
+  const hudEl =
+    root.querySelector("#rs-hud");
 
-  const upgradePanel =
-    root.querySelector("#riot-soldier-upgrades");
+  const classLabelEl =
+    root.querySelector("#rs-class-label");
 
-  const classNameElement =
-    root.querySelector("#riot-soldier-class-name");
+  const auxEl =
+    root.querySelector("#rs-aux");
 
-  const hpFill =
-    root.querySelector("#riot-soldier-hp-fill");
+  const killNoteEl =
+    root.querySelector("#rs-kill-note");
 
-  const auxElement =
-    root.querySelector("#riot-soldier-aux");
+  const classEl =
+    root.querySelector("#rs-class");
 
-  const reloadLevelElement =
-    root.querySelector("#riot-reload-level");
+  const auxPopupEl =
+    root.querySelector("#rs-aux-popup");
 
-  const fireLevelElement =
-    root.querySelector("#riot-fire-level");
+  const respawnEl =
+    root.querySelector("#rs-respawn");
 
-  const moveLevelElement =
-    root.querySelector("#riot-move-level");
-
-  const killFeed =
-    root.querySelector("#riot-soldier-kill-feed");
-
-  const help =
-    root.querySelector("#riot-soldier-help");
-
-
-  /* =========================================================
-     GAME CONSTANTS
-  ========================================================= */
-
-  const WORLD_WIDTH = 5000;
-  const WORLD_HEIGHT = 5000;
-
-  const MAX_PLAYERS = 10;
-
-  const CLASSES = {
-    assaulter: {
-      label: "ASSAULTER",
-      color: "#42b982"
-    },
-
-    sniper: {
-      label: "SNIPER",
-      color: "#82b1ff"
-    },
-
-    rpg: {
-      label: "RPG",
-      color: "#f39b70"
-    },
-
-    shotgun: {
-      label: "SHOTGUN",
-      color: "#e8c878"
-    }
-  };
-
-
-  /* =========================================================
-     STATE
-  ========================================================= */
+  const controlsEl =
+    root.querySelector("#rs-controls");
 
   let W = window.innerWidth;
   let H = window.innerHeight;
-
   let dpr = 1;
 
   let ws = null;
 
   let connected = false;
-
   let myId = null;
+  let roomKey = null;
 
-  let currentRoom = null;
+  let worldMap = [];
+  let worldProjectiles = [];
 
-  let currentMap = [];
-
-  let projectiles = [];
-
-  let animationId = 0;
-
-  let inputTimer = 0;
-
-  let destroyed = false;
+  const players = Object.create(null);
+  const keys = Object.create(null);
 
   let mouseX = W / 2;
-
   let mouseY = H / 2;
-
   let mouseDown = false;
-
-  let lastMouseDown = false;
-
-  let pulseShot = false;
 
   let selectedClass = "assaulter";
 
-  let cameraX = WORLD_WIDTH / 2;
+  let myAux = 0;
+  let myReloadLevel = 0;
+  let myFireLevel = 0;
+  let myMoveLevel = 0;
 
-  let cameraY = WORLD_HEIGHT / 2;
+  let auxPopupTimer = 0;
+  let killNoteTimer = 0;
+  let animationId = 0;
+  let inputTimer = 0;
+  let destroyed = false;
 
-  let lastStateTime = 0;
-
-  let serverLatency = 0;
-
-  const keys = Object.create(null);
-
-  const players = Object.create(null);
-
-
-  /* =========================================================
-     HELPERS
-  ========================================================= */
+  /*
+   * ============================================
+   * BASIC UI
+   * ============================================
+   */
 
   function setStatus(text) {
-    status.textContent = text;
+    statusEl.textContent = text;
   }
 
-
-  function clamp(value, min, max) {
-    return Math.max(
-      min,
-      Math.min(max, value)
-    );
-  }
-
-
-  function lerp(a, b, t) {
-    return a + (b - a) * t;
-  }
-
-
-  function normalizeAngle(angle) {
-    while (angle > Math.PI) {
-      angle -= Math.PI * 2;
-    }
-
-    while (angle < -Math.PI) {
-      angle += Math.PI * 2;
-    }
-
-    return angle;
-  }
-
-
-  function lerpAngle(a, b, t) {
-    const diff =
-      normalizeAngle(b - a);
-
-    return a + diff * t;
-  }
-
-
-  function escapeHTML(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-
-  /* =========================================================
-     RESIZE
-  ========================================================= */
+  /*
+   * ============================================
+   * CANVAS
+   * ============================================
+   */
 
   function resize() {
-
-    W = window.innerWidth;
-    H = window.innerHeight;
+    W = Math.max(1, window.innerWidth);
+    H = Math.max(1, window.innerHeight);
 
     dpr =
       Math.min(
@@ -757,136 +661,582 @@
     );
   }
 
+  /*
+   * IMPORTANT:
+   *
+   * There is NO CAMERA.
+   *
+   * The entire server map is fitted into the
+   * browser viewport. Players move inside this
+   * fixed area.
+   */
 
-  /* =========================================================
-     CONNECTION
-  ========================================================= */
+  function worldViewport() {
+    const marginX =
+      Math.min(
+        28,
+        W * 0.02
+      );
 
-  function normalizeServerURL(value) {
+    const marginY =
+      Math.min(
+        70,
+        H * 0.07
+      );
 
-    let url =
-      String(value || "")
-        .trim();
+    const availableW =
+      Math.max(
+        100,
+        W - marginX * 2
+      );
 
-    if (!url) {
-      return "";
-    }
+    const availableH =
+      Math.max(
+        100,
+        H - marginY * 2
+      );
 
-    /*
-      Automatically convert the normal
-      Cloudflare HTTPS worker URL to
-      the WebSocket endpoint.
-    */
+    const scale =
+      Math.min(
+        availableW / WORLD_WIDTH,
+        availableH / WORLD_HEIGHT
+      );
 
-    if (
-      /^https:\/\//i.test(url)
-    ) {
+    const mapW =
+      WORLD_WIDTH * scale;
 
-      url =
-        url.replace(
-          /^https:\/\//i,
-          "wss://"
-        );
-    }
+    const mapH =
+      WORLD_HEIGHT * scale;
 
-    else if (
-      /^http:\/\//i.test(url)
-    ) {
-
-      url =
-        url.replace(
-          /^http:\/\//i,
-          "ws://"
-        );
-    }
-
-
-    if (
-      /^wss?:\/\//i.test(url) &&
-      !url.endsWith("/ws")
-    ) {
-
-      url =
-        url.replace(
-          /\/+$/,
-          ""
-        ) + "/ws";
-    }
-
-
-    return url;
+    return {
+      x: (W - mapW) / 2,
+      y: (H - mapH) / 2,
+      w: mapW,
+      h: mapH,
+      scale
+    };
   }
 
+  function worldToScreen(x, y) {
+    const v =
+      worldViewport();
 
-  function connect() {
+    return {
+      x:
+        v.x +
+        x * v.scale,
 
-    const server =
-      normalizeServerURL(
-        serverInput.value
-      );
+      y:
+        v.y +
+        y * v.scale
+    };
+  }
+
+  function screenToWorld(x, y) {
+    const v =
+      worldViewport();
+
+    return {
+      x:
+        (x - v.x) /
+        v.scale,
+
+      y:
+        (y - v.y) /
+        v.scale
+    };
+  }
+
+  /*
+   * ============================================
+   * PLAYER DATA
+   * ============================================
+   */
+
+  function normalizePlayer(data) {
+    return {
+      id: data.id,
+
+      name:
+        data.name ||
+        "PLAYER",
+
+      x:
+        Number.isFinite(data.x)
+          ? data.x
+          : WORLD_WIDTH / 2,
+
+      y:
+        Number.isFinite(data.y)
+          ? data.y
+          : WORLD_HEIGHT / 2,
+
+      targetX:
+        Number.isFinite(data.x)
+          ? data.x
+          : WORLD_WIDTH / 2,
+
+      targetY:
+        Number.isFinite(data.y)
+          ? data.y
+          : WORLD_HEIGHT / 2,
+
+      angle:
+        Number.isFinite(data.angle)
+          ? data.angle
+          : 0,
+
+      targetAngle:
+        Number.isFinite(data.angle)
+          ? data.angle
+          : 0,
+
+      hp:
+        Number.isFinite(data.hp)
+          ? data.hp
+          : 100,
+
+      maxHp:
+        Number.isFinite(data.maxHp)
+          ? data.maxHp
+          : 100,
+
+      class:
+        data.class ||
+        "assaulter",
+
+      alive:
+        data.alive !== false,
+
+      aux:
+        Number.isFinite(data.aux)
+          ? data.aux
+          : 0,
+
+      reloadLevel:
+        Number(data.reloadLevel || 0),
+
+      fireLevel:
+        Number(data.fireLevel || 0),
+
+      moveLevel:
+        Number(data.moveLevel || 0),
+
+      reloading:
+        !!data.reloading
+    };
+  }
+
+  function updatePlayer(data) {
+    if (!data || data.id == null) {
+      return;
+    }
+
+    const id =
+      String(data.id);
+
+    const p =
+      players[id];
+
+    if (!p) {
+      players[id] =
+        normalizePlayer(data);
+
+      return;
+    }
+
+    p.name =
+      data.name ||
+      p.name;
+
+    if (Number.isFinite(data.x)) {
+      p.targetX = data.x;
+    }
+
+    if (Number.isFinite(data.y)) {
+      p.targetY = data.y;
+    }
+
+    if (Number.isFinite(data.angle)) {
+      p.targetAngle = data.angle;
+    }
+
+    if (Number.isFinite(data.hp)) {
+      p.hp = data.hp;
+    }
+
+    if (Number.isFinite(data.maxHp)) {
+      p.maxHp = data.maxHp;
+    }
+
+    if (data.class) {
+      p.class = data.class;
+    }
+
+    p.alive =
+      data.alive !== false;
+
+    if (Number.isFinite(data.aux)) {
+      p.aux = data.aux;
+    }
+
+    if (Number.isFinite(data.reloadLevel)) {
+      p.reloadLevel =
+        data.reloadLevel;
+    }
+
+    if (Number.isFinite(data.fireLevel)) {
+      p.fireLevel =
+        data.fireLevel;
+    }
+
+    if (Number.isFinite(data.moveLevel)) {
+      p.moveLevel =
+        data.moveLevel;
+    }
+
+    if ("reloading" in data) {
+      p.reloading =
+        !!data.reloading;
+    }
+  }
+
+  /*
+   * ============================================
+   * HUD
+   * ============================================
+   */
+
+  function applyMyStats(data) {
+    if (!data) {
+      return;
+    }
+
+    if (Number.isFinite(data.aux)) {
+      myAux = data.aux;
+    }
+
+    if (Number.isFinite(data.reloadLevel)) {
+      myReloadLevel =
+        data.reloadLevel;
+    }
+
+    if (Number.isFinite(data.fireLevel)) {
+      myFireLevel =
+        data.fireLevel;
+    }
+
+    if (Number.isFinite(data.moveLevel)) {
+      myMoveLevel =
+        data.moveLevel;
+    }
+
+    const me =
+      players[myId];
+
+    if (me) {
+      me.aux =
+        myAux;
+
+      me.reloadLevel =
+        myReloadLevel;
+
+      me.fireLevel =
+        myFireLevel;
+
+      me.moveLevel =
+        myMoveLevel;
+    }
+
+    updateHud();
+  }
+
+  function updateHud() {
+    const me =
+      players[myId];
+
+    const cls =
+      me?.class ||
+      selectedClass;
+
+    selectedClass =
+      cls;
+
+    classLabelEl.textContent =
+      CLASSES[cls]?.label ||
+      String(cls).toUpperCase();
+
+    auxEl.textContent =
+      `AUX ${myAux}`;
+
+    root.querySelector(
+      '[data-upgrade="reload"]'
+    ).innerHTML =
+      `RELOAD<br>LV ${myReloadLevel}`;
+
+    root.querySelector(
+      '[data-upgrade="fire"]'
+    ).innerHTML =
+      `FIRE<br>LV ${myFireLevel}`;
+
+    root.querySelector(
+      '[data-upgrade="move"]'
+    ).innerHTML =
+      `MOVE<br>LV ${myMoveLevel}`;
+
+    root
+      .querySelectorAll(".rs-class-button")
+      .forEach(button => {
+        button.classList.toggle(
+          "active",
+          button.dataset.class === cls
+        );
+      });
+  }
+
+  function updatePlayerList() {
+    const list =
+      Object.values(players);
+
+    countEl.textContent =
+      `${list.length}/${MAX_PLAYERS}`;
+
+    playerListEl.innerHTML = "";
+
+    list.forEach((p, index) => {
+      const row =
+        document.createElement("div");
+
+      row.className =
+        "rs-player" +
+        (
+          p.id === myId
+            ? " you"
+            : ""
+        );
+
+      const left =
+        document.createElement("span");
+
+      left.textContent =
+        `${index + 1}. ${
+          p.id === myId
+            ? "YOU"
+            : (p.name || "PLAYER")
+        }`;
+
+      const right =
+        document.createElement("span");
+
+      right.textContent =
+        CLASSES[p.class]?.label
+          ?.slice(0, 3) ||
+        "???";
+
+      row.appendChild(left);
+      row.appendChild(right);
+
+      playerListEl.appendChild(row);
+    });
+  }
+
+  /*
+   * ============================================
+   * GAME ACTIVE / INACTIVE
+   * ============================================
+   */
+
+  function setGameActive(active) {
+    root.classList.toggle(
+      "game-active",
+      active
+    );
+
+    roomEl.style.display =
+      active
+        ? "block"
+        : "none";
+
+    playersEl.style.display =
+      active
+        ? "block"
+        : "none";
+
+    hudEl.style.display =
+      active
+        ? "block"
+        : "none";
+
+    classEl.style.display =
+      active
+        ? "block"
+        : "none";
+
+    leaveButton.style.display =
+      active
+        ? "inline-block"
+        : "none";
+
+    joinButton.style.display =
+      active
+        ? "none"
+        : "inline-block";
+
+    /*
+     * BEFORE JOIN:
+     *
+     * The root cannot receive clicks.
+     * Riot page works normally.
+     *
+     * The room control itself is restored
+     * to pointer-events:auto.
+     */
+
+    if (active) {
+      root.style.pointerEvents =
+        "auto";
+
+      canvas.style.pointerEvents =
+        "auto";
+
+      controlsEl.style.pointerEvents =
+        "auto";
+    } else {
+      root.style.pointerEvents =
+        "none";
+
+      canvas.style.pointerEvents =
+        "none";
+
+      controlsEl.style.pointerEvents =
+        "auto";
+    }
+
+    updateHud();
+  }
+
+  /*
+   * ============================================
+   * CONNECTION
+   * ============================================
+   */
+
+  function closeSocket() {
+    if (!ws) {
+      return;
+    }
+
+    try {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      ws.close();
+    } catch (e) {}
+
+    ws = null;
+  }
+
+  function clearPlayers() {
+    for (const id of Object.keys(players)) {
+      delete players[id];
+    }
+
+    worldProjectiles = [];
+
+    updatePlayerList();
+  }
+
+  /*
+   * ============================================
+   * AUX / KILL MESSAGE
+   * ============================================
+   */
+
+  function showAuxPopup(amount) {
+    auxPopupEl.textContent =
+      `+${amount} AUX`;
+
+    auxPopupEl.style.display =
+      "block";
+
+    clearTimeout(auxPopupTimer);
+
+    auxPopupTimer =
+      setTimeout(() => {
+        auxPopupEl.style.display =
+          "none";
+      }, 1400);
+  }
+
+  function showKillNote(text) {
+    killNoteEl.textContent =
+      text;
+
+    clearTimeout(killNoteTimer);
+
+    killNoteTimer =
+      setTimeout(() => {
+        killNoteEl.textContent =
+          "";
+      }, 2200);
+  }
+
+  /*
+   * ============================================
+   * JOIN ROOM
+   * ============================================
+   */
+
+  function joinRoom() {
+    /*
+     * Accept letters, numbers and hyphens.
+     * This fixes the previous issue where only
+     * some characters could be entered.
+     */
 
     const key =
-      keyInput.value
+      roomKeyInput.value
         .trim()
-        .toUpperCase();
+        .toUpperCase()
+        .replace(/[^A-Z0-9-]/g, "")
+        .slice(0, 32);
 
-
-    if (!server) {
-
-      setStatus(
-        "ENTER SERVER"
-      );
-
-      return;
-    }
-
-
-    if (!/^wss?:\/\//i.test(server)) {
-
-      setStatus(
-        "INVALID SERVER"
-      );
-
-      return;
-    }
-
+    roomKeyInput.value =
+      key;
 
     if (!key) {
-
       setStatus(
         "ENTER ROOM KEY"
       );
 
-      keyInput.focus();
+      roomKeyInput.focus();
 
       return;
     }
 
-
     closeSocket();
-
     clearPlayers();
 
     connected = false;
-
     myId = null;
+    roomKey = null;
 
-    currentRoom = null;
+    myAux = 0;
+    myReloadLevel = 0;
+    myFireLevel = 0;
+    myMoveLevel = 0;
 
     setStatus(
       "CONNECTING..."
     );
 
-
     try {
-
       ws =
         new WebSocket(
-          server
+          SERVER_URL
         );
-
-    } catch {
-
+    } catch (error) {
       setStatus(
         "INVALID SERVER"
       );
@@ -894,61 +1244,430 @@
       return;
     }
 
-
     ws.onopen = () => {
-
       if (!ws) {
         return;
       }
-
 
       setStatus(
         "JOINING ROOM..."
       );
 
+      /*
+       * Keep this protocol compatible
+       * with the Worker.
+       */
 
-      send({
-        type:
-          "join_room",
-
-        key
-      });
+      ws.send(
+        JSON.stringify({
+          type: "join_room",
+          key
+        })
+      );
     };
 
+    ws.onmessage = event => {
+      let message;
 
-    ws.onmessage =
-      handleServerMessage;
+      try {
+        message =
+          JSON.parse(
+            event.data
+          );
+      } catch (error) {
+        return;
+      }
 
+      /*
+       * ============================
+       * JOINED
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "joined"
+      ) {
+        connected = true;
+
+        myId =
+          String(
+            message.player_id
+          );
+
+        roomKey =
+          message.room ||
+          key;
+
+        roomValueEl.textContent =
+          roomKey;
+
+        setStatus(
+          message.is_host
+            ? "ONLINE HOST"
+            : "ONLINE"
+        );
+
+        if (
+          Array.isArray(
+            message.map
+          )
+        ) {
+          worldMap =
+            message.map;
+        }
+
+        setGameActive(
+          true
+        );
+
+        updatePlayerList();
+        updateHud();
+
+        console.log(
+          "[RIOT SOLDIER] JOINED",
+          roomKey,
+          myId
+        );
+
+        return;
+      }
+
+      /*
+       * ============================
+       * STATE
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "state"
+      ) {
+        const incoming =
+          Array.isArray(
+            message.players
+          )
+            ? message.players
+            : [];
+
+        const ids =
+          new Set(
+            incoming.map(
+              p =>
+                String(p.id)
+            )
+          );
+
+        for (
+          const id of
+          Object.keys(players)
+        ) {
+          if (
+            !ids.has(
+              String(id)
+            )
+          ) {
+            delete players[id];
+          }
+        }
+
+        incoming.forEach(
+          updatePlayer
+        );
+
+        if (
+          Array.isArray(
+            message.projectiles
+          )
+        ) {
+          worldProjectiles =
+            message.projectiles;
+        }
+
+        if (
+          Array.isArray(
+            message.map
+          )
+        ) {
+          worldMap =
+            message.map;
+        }
+
+        const me =
+          players[myId];
+
+        if (me) {
+          myAux =
+            Number(
+              me.aux || 0
+            );
+
+          myReloadLevel =
+            Number(
+              me.reloadLevel || 0
+            );
+
+          myFireLevel =
+            Number(
+              me.fireLevel || 0
+            );
+
+          myMoveLevel =
+            Number(
+              me.moveLevel || 0
+            );
+
+          selectedClass =
+            me.class ||
+            selectedClass;
+        }
+
+        updatePlayerList();
+        updateHud();
+
+        return;
+      }
+
+      /*
+       * ============================
+       * PLAYER JOINED
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "player_joined"
+      ) {
+        if (
+          message.player
+        ) {
+          updatePlayer(
+            message.player
+          );
+
+          updatePlayerList();
+        }
+
+        return;
+      }
+
+      /*
+       * ============================
+       * PLAYER LEFT
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "player_left"
+      ) {
+        delete players[
+          String(
+            message.player_id
+          )
+        ];
+
+        updatePlayerList();
+
+        return;
+      }
+
+      /*
+       * ============================
+       * PLAYER INPUT
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "player_input"
+      ) {
+        const p =
+          players[
+            String(
+              message.player_id
+            )
+          ];
+
+        if (!p) {
+          return;
+        }
+
+        if (
+          Number.isFinite(
+            message.x
+          )
+        ) {
+          p.targetX =
+            message.x;
+        }
+
+        if (
+          Number.isFinite(
+            message.y
+          )
+        ) {
+          p.targetY =
+            message.y;
+        }
+
+        if (
+          Number.isFinite(
+            message.angle
+          )
+        ) {
+          p.targetAngle =
+            message.angle;
+        }
+
+        if (
+          message.class
+        ) {
+          p.class =
+            message.class;
+        }
+
+        return;
+      }
+
+      /*
+       * ============================
+       * PLAYER STATS
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "player_stats"
+      ) {
+        if (
+          String(
+            message.player_id
+          ) ===
+          String(myId)
+        ) {
+          applyMyStats(
+            message
+          );
+        }
+
+        return;
+      }
+
+      /*
+       * ============================
+       * HIT / KILL
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "hit"
+      ) {
+        if (
+          String(
+            message.killer_id
+          ) ===
+          String(myId)
+        ) {
+          const amount =
+            Number(
+              message.aux ||
+              10
+            );
+
+          myAux =
+            Number(
+              message.auxTotal ??
+              (
+                myAux +
+                amount
+              )
+            );
+
+          showAuxPopup(
+            amount
+          );
+
+          showKillNote(
+            `KILL +${amount} AUX${
+              message.weapon
+                ? ` • ${String(
+                    message.weapon
+                  ).toUpperCase()}`
+                : ""
+            }`
+          );
+
+          updateHud();
+        }
+
+        return;
+      }
+
+      /*
+       * ============================
+       * ERROR
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "error"
+      ) {
+        setStatus(
+          String(
+            message.message ||
+            "ERROR"
+          )
+        );
+
+        if (!connected) {
+          setGameActive(
+            false
+          );
+        }
+
+        return;
+      }
+
+      /*
+       * ============================
+       * PONG
+       * ============================
+       */
+
+      if (
+        message.type ===
+        "pong"
+      ) {
+        return;
+      }
+    };
 
     ws.onerror = () => {
-
       setStatus(
         "SERVER ERROR"
       );
     };
 
-
     ws.onclose = () => {
+      if (destroyed) {
+        return;
+      }
 
       connected = false;
 
       myId = null;
+      roomKey = null;
 
-      currentRoom = null;
+      mouseDown = false;
 
-      projectiles = [];
+      clearPlayers();
 
-      roomBox.style.display =
-        "none";
-
-      playerList.style.display =
-        "none";
-
-      classPanel.style.display =
-        "none";
-
-      upgradePanel.style.display =
-        "none";
+      setGameActive(
+        false
+      );
 
       setStatus(
         "OFFLINE"
@@ -956,925 +1675,44 @@
     };
   }
 
+  /*
+   * ============================================
+   * LEAVE
+   * ============================================
+   */
 
-  function closeSocket() {
+  function leaveRoom() {
+    mouseDown = false;
 
-    if (!ws) {
-      return;
-    }
+    keys.w = false;
+    keys.a = false;
+    keys.s = false;
+    keys.d = false;
 
+    closeSocket();
 
-    try {
+    connected = false;
+    myId = null;
+    roomKey = null;
 
-      ws.onopen = null;
-      ws.onmessage = null;
-      ws.onerror = null;
-      ws.onclose = null;
+    clearPlayers();
 
-      ws.close();
-
-    } catch {}
-
-
-    ws = null;
-  }
-
-
-  function send(data) {
-
-    if (
-      !ws ||
-      ws.readyState !==
-        WebSocket.OPEN
-    ) {
-
-      return false;
-    }
-
-
-    try {
-
-      ws.send(
-        JSON.stringify(data)
-      );
-
-      return true;
-
-    } catch {
-
-      return false;
-    }
-  }
-
-
-  /* =========================================================
-     SERVER MESSAGE
-  ========================================================= */
-
-  function handleServerMessage(event) {
-
-    let message;
-
-
-    try {
-
-      message =
-        JSON.parse(
-          event.data
-        );
-
-    } catch {
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "joined"
-    ) {
-
-      connected = true;
-
-      myId =
-        message.player_id;
-
-      currentRoom =
-        message.room || "";
-
-      currentMap =
-        Array.isArray(
-          message.map
-        )
-          ? message.map
-          : [];
-
-
-      roomKeyElement.textContent =
-        currentRoom;
-
-
-      roomBox.style.display =
-        "block";
-
-      playerList.style.display =
-        "block";
-
-      classPanel.style.display =
-        "flex";
-
-      upgradePanel.style.display =
-        "block";
-
-      help.style.display =
-        "none";
-
-
-      setStatus(
-        message.is_host
-          ? "ONLINE • HOST"
-          : "ONLINE"
-      );
-
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "state"
-    ) {
-
-      applyState(
-        message
-      );
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "hit"
-    ) {
-
-      const amount =
-        Number(
-          message.aux || 0
-        );
-
-
-      if (amount > 0) {
-
-        addFeed(
-          "+" +
-          amount +
-          " AUX  •  KILL"
-        );
-      }
-
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "player_stats"
-    ) {
-
-      const me =
-        players[myId];
-
-      if (me) {
-
-        me.aux =
-          Number(
-            message.aux ??
-            me.aux
-          );
-
-        me.reloadLevel =
-          Number(
-            message.reloadLevel ??
-            me.reloadLevel ??
-            0
-          );
-
-        me.fireLevel =
-          Number(
-            message.fireLevel ??
-            me.fireLevel ??
-            0
-          );
-
-        me.moveLevel =
-          Number(
-            message.moveLevel ??
-            me.moveLevel ??
-            0
-          );
-      }
-
-
-      updateHUD();
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "player_left"
-    ) {
-
-      delete players[
-        message.player_id
-      ];
-
-      updatePlayerList();
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "error"
-    ) {
-
-      setStatus(
-        String(
-          message.message ||
-          "SERVER ERROR"
-        )
-      );
-
-      return;
-    }
-
-
-    if (
-      message.type ===
-      "pong"
-    ) {
-
-      serverLatency =
-        Date.now() -
-        lastStateTime;
-
-      return;
-    }
-  }
-
-
-  /* =========================================================
-     STATE
-  ========================================================= */
-
-  function applyState(message) {
-
-    lastStateTime =
-      Date.now();
-
-
-    if (
-      Array.isArray(
-        message.map
-      )
-    ) {
-
-      currentMap =
-        message.map;
-    }
-
-
-    projectiles =
-      Array.isArray(
-        message.projectiles
-      )
-        ? message.projectiles
-        : [];
-
-
-    const incoming =
-      Array.isArray(
-        message.players
-      )
-        ? message.players
-        : [];
-
-
-    const incomingIds =
-      new Set(
-        incoming.map(
-          p => String(p.id)
-        )
-      );
-
-
-    Object.keys(
-      players
-    ).forEach(id => {
-
-      if (
-        !incomingIds.has(
-          String(id)
-        )
-      ) {
-
-        delete players[id];
-      }
-    });
-
-
-    incoming.forEach(
-      updatePlayer
+    setGameActive(
+      false
     );
 
-
-    updatePlayerList();
-
-    updateHUD();
-  }
-
-
-  function updatePlayer(data) {
-
-    if (
-      !data ||
-      data.id == null
-    ) {
-
-      return;
-    }
-
-
-    const id =
-      String(data.id);
-
-
-    const existing =
-      players[id];
-
-
-    if (!existing) {
-
-      players[id] = {
-
-        id,
-
-        name:
-          data.name ||
-          "PLAYER",
-
-        x:
-          Number(data.x) || 0,
-
-        y:
-          Number(data.y) || 0,
-
-        targetX:
-          Number(data.x) || 0,
-
-        targetY:
-          Number(data.y) || 0,
-
-        angle:
-          Number(data.angle) || 0,
-
-        targetAngle:
-          Number(data.angle) || 0,
-
-        hp:
-          Number(data.hp) || 100,
-
-        maxHp:
-          Number(data.maxHp) || 100,
-
-        class:
-          data.class ||
-          "assaulter",
-
-        alive:
-          data.alive !== false,
-
-        aux:
-          Number(data.aux) || 0,
-
-        reloadLevel:
-          Number(data.reloadLevel) || 0,
-
-        fireLevel:
-          Number(data.fireLevel) || 0,
-
-        moveLevel:
-          Number(data.moveLevel) || 0,
-
-        reloading:
-          !!data.reloading,
-
-        deathShown:
-          false
-      };
-
-
-      return;
-    }
-
-
-    existing.name =
-      data.name ||
-      existing.name;
-
-
-    existing.targetX =
-      Number.isFinite(
-        Number(data.x)
-      )
-        ? Number(data.x)
-        : existing.targetX;
-
-
-    existing.targetY =
-      Number.isFinite(
-        Number(data.y)
-      )
-        ? Number(data.y)
-        : existing.targetY;
-
-
-    existing.targetAngle =
-      Number.isFinite(
-        Number(data.angle)
-      )
-        ? Number(data.angle)
-        : existing.targetAngle;
-
-
-    existing.hp =
-      Number.isFinite(
-        Number(data.hp)
-      )
-        ? Number(data.hp)
-        : existing.hp;
-
-
-    existing.maxHp =
-      Number.isFinite(
-        Number(data.maxHp)
-      )
-        ? Number(data.maxHp)
-        : existing.maxHp;
-
-
-    existing.class =
-      data.class ||
-      existing.class;
-
-
-    existing.alive =
-      data.alive !== false;
-
-
-    existing.aux =
-      Number.isFinite(
-        Number(data.aux)
-      )
-        ? Number(data.aux)
-        : existing.aux;
-
-
-    existing.reloadLevel =
-      Number(
-        data.reloadLevel ??
-        existing.reloadLevel ??
-        0
-      );
-
-
-    existing.fireLevel =
-      Number(
-        data.fireLevel ??
-        existing.fireLevel ??
-        0
-      );
-
-
-    existing.moveLevel =
-      Number(
-        data.moveLevel ??
-        existing.moveLevel ??
-        0
-      );
-
-
-    existing.reloading =
-      !!data.reloading;
-  }
-
-
-  function clearPlayers() {
-
-    Object.keys(
-      players
-    ).forEach(
-      id => delete players[id]
-    );
-
-
-    projectiles = [];
-
-    updatePlayerList();
-
-    updateHUD();
-  }
-
-
-  /* =========================================================
-     PLAYER LIST
-  ========================================================= */
-
-  function updatePlayerList() {
-
-    const list =
-      Object.values(
-        players
-      );
-
-
-    playerCount.textContent =
-      `PLAYERS: ${list.length} / ${MAX_PLAYERS}`;
-
-
-    playersElement.innerHTML =
-      "";
-
-
-    list
-      .sort((a, b) => {
-
-        if (a.id === myId) {
-          return -1;
-        }
-
-        if (b.id === myId) {
-          return 1;
-        }
-
-        return String(
-          a.name
-        ).localeCompare(
-          String(b.name)
-        );
-      })
-      .forEach(
-        player => {
-
-          const row =
-            document.createElement(
-              "div"
-            );
-
-
-          row.className =
-            "riot-player-row" +
-            (
-              player.id === myId
-                ? " you"
-                : ""
-            );
-
-
-          const name =
-            player.id === myId
-              ? "YOU"
-              : (
-                  player.name ||
-                  "PLAYER"
-                );
-
-
-          const cls =
-            (
-              player.class ||
-              "assaulter"
-            )
-              .toUpperCase();
-
-
-          row.innerHTML =
-            `
-              <span>
-                ${escapeHTML(name)}
-              </span>
-              <span class="riot-player-class">
-                ${escapeHTML(cls)}
-              </span>
-            `;
-
-
-          playersElement.appendChild(
-            row
-          );
-        }
-      );
-  }
-
-
-  /* =========================================================
-     HUD
-  ========================================================= */
-
-  function updateHUD() {
-
-    const me =
-      players[myId];
-
-
-    if (!me) {
-      return;
-    }
-
-
-    const cls =
-      CLASSES[
-        me.class
-      ] ||
-      CLASSES.assaulter;
-
-
-    classNameElement.textContent =
-      cls.label;
-
-
-    const hp =
-      clamp(
-        Number(me.hp) || 0,
-        0,
-        Number(me.maxHp) || 100
-      );
-
-
-    const maxHp =
-      Number(me.maxHp) || 100;
-
-
-    hpFill.style.width =
-      (
-        hp / maxHp * 100
-      ) + "%";
-
-
-    auxElement.textContent =
-      `AUX: ${Math.floor(
-        Number(me.aux) || 0
-      )}`;
-
-
-    reloadLevelElement.textContent =
-      `LV ${Number(
-        me.reloadLevel || 0
-      )}`;
-
-
-    fireLevelElement.textContent =
-      `LV ${Number(
-        me.fireLevel || 0
-      )}`;
-
-
-    moveLevelElement.textContent =
-      `LV ${Number(
-        me.moveLevel || 0
-      )}`;
-
-
-    selectedClass =
-      me.class ||
-      selectedClass;
-
-
-    updateClassButtons();
-  }
-
-
-  function updateClassButtons() {
-
-    root
-      .querySelectorAll(
-        ".riot-class-button"
-      )
-      .forEach(
-        button => {
-
-          button.classList.toggle(
-            "active",
-
-            button.dataset.class ===
-              selectedClass
-          );
-        }
-      );
-  }
-
-
-  /* =========================================================
-     CLASS SWITCH
-  ========================================================= */
-
-  function chooseClass(className) {
-
-    if (
-      !CLASSES[className]
-    ) {
-
-      return;
-    }
-
-
-    selectedClass =
-      className;
-
-
-    updateClassButtons();
-
-
-    send({
-
-      type:
-        "input",
-
-      input: {
-
-        w: !!keys.w,
-
-        a: !!keys.a,
-
-        s: !!keys.s,
-
-        d: !!keys.d,
-
-        shooting: false
-      },
-
-      angle:
-        getAimAngle(),
-
-      class:
-        selectedClass
-    });
-  }
-
-
-  /* =========================================================
-     UPGRADES
-  ========================================================= */
-
-  function buyUpgrade(upgrade) {
-
-    if (!connected) {
-      return;
-    }
-
-
-    send({
-
-      type:
-        "upgrade",
-
-      upgrade
-    });
-  }
-
-
-  /* =========================================================
-     CAMERA
-  ========================================================= */
-
-  function updateCamera() {
-
-    const me =
-      players[myId];
-
-
-    if (!me) {
-
-      cameraX =
-        lerp(
-          cameraX,
-          WORLD_WIDTH / 2,
-          .08
-        );
-
-      cameraY =
-        lerp(
-          cameraY,
-          WORLD_HEIGHT / 2,
-          .08
-        );
-
-      return;
-    }
-
-
-    cameraX =
-      lerp(
-        cameraX,
-        Number(me.x) || 0,
-        .18
-      );
-
-
-    cameraY =
-      lerp(
-        cameraY,
-        Number(me.y) || 0,
-        .18
-      );
-
-
-    /*
-      Keep camera inside world.
-    */
-
-    const halfW =
-      W / 2;
-
-    const halfH =
-      H / 2;
-
-
-    cameraX =
-      clamp(
-        cameraX,
-        halfW,
-        WORLD_WIDTH - halfW
-      );
-
-
-    cameraY =
-      clamp(
-        cameraY,
-        halfH,
-        WORLD_HEIGHT - halfH
-      );
-  }
-
-
-  function worldToScreen(x, y) {
-
-    return {
-
-      x:
-        x -
-        cameraX +
-        W / 2,
-
-      y:
-        y -
-        cameraY +
-        H / 2
-    };
-  }
-
-
-  function screenToWorld(x, y) {
-
-    return {
-
-      x:
-        x -
-        W / 2 +
-        cameraX,
-
-      y:
-        y -
-        H / 2 +
-        cameraY
-    };
-  }
-
-
-  /* =========================================================
-     AIM
-  ========================================================= */
-
-  function getAimAngle() {
-
-    const me =
-      players[myId];
-
-
-    if (!me) {
-      return 0;
-    }
-
-
-    const screen =
-      worldToScreen(
-        me.x,
-        me.y
-      );
-
-
-    return Math.atan2(
-      mouseY -
-        screen.y,
-
-      mouseX -
-        screen.x
+    setStatus(
+      "OFFLINE"
     );
   }
 
-
-  /* =========================================================
-     INPUT
-  ========================================================= */
+  /*
+   * ============================================
+   * INPUT
+   * ============================================
+   */
 
   function sendInput() {
-
     if (
       !connected ||
       !ws ||
@@ -1882,363 +1720,335 @@
         WebSocket.OPEN ||
       !myId
     ) {
-
       return;
     }
 
-
     const me =
       players[myId];
-
 
     if (!me) {
       return;
     }
 
+    const target =
+      screenToWorld(
+        mouseX,
+        mouseY
+      );
 
-    /*
-      Assaulter:
-        holding click stays true.
+    const angle =
+      Math.atan2(
+        target.y - me.y,
+        target.x - me.x
+      );
 
-      Sniper/RPG/Shotgun:
-        only send a single true pulse
-        when mouse is first pressed.
-    */
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "input",
 
-    const shooting =
-      me.class ===
-        "assaulter"
-        ? mouseDown
-        : pulseShot;
+          input: {
+            w: !!keys.w,
+            a: !!keys.a,
+            s: !!keys.s,
+            d: !!keys.d,
+            shooting: !!mouseDown
+          },
 
+          angle,
 
-    send({
-
-      type:
-        "input",
-
-      input: {
-
-        w: !!keys.w,
-
-        a: !!keys.a,
-
-        s: !!keys.s,
-
-        d: !!keys.d,
-
-        shooting
-      },
-
-      angle:
-        getAimAngle(),
-
-      class:
-        me.class ||
-        selectedClass
-    });
-
-
-    pulseShot =
-      false;
-
-
-    lastMouseDown =
-      mouseDown;
+          class:
+            selectedClass
+        })
+      );
+    } catch (error) {
+      setStatus(
+        "SEND FAILED"
+      );
+    }
   }
 
+  /*
+   * ============================================
+   * CLASS SELECTION
+   * ============================================
+   */
 
-  /* =========================================================
-     SMOOTH PLAYERS
-  ========================================================= */
+  function chooseClass(className) {
+    if (
+      !CLASSES[className] ||
+      !connected
+    ) {
+      return;
+    }
+
+    selectedClass =
+      className;
+
+    updateHud();
+
+    sendInput();
+  }
+
+  /*
+   * ============================================
+   * UPGRADES
+   * ============================================
+   */
+
+  function buyUpgrade(upgrade) {
+    if (
+      !connected ||
+      !ws ||
+      ws.readyState !==
+        WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "upgrade",
+          upgrade
+        })
+      );
+    } catch (error) {}
+  }
+
+  /*
+   * ============================================
+   * SMOOTH PLAYER DISPLAY
+   * ============================================
+   */
+
+  function lerpAngle(
+    a,
+    b,
+    amount
+  ) {
+    let diff =
+      (
+        b -
+        a +
+        Math.PI
+      ) %
+        (Math.PI * 2) -
+      Math.PI;
+
+    return (
+      a +
+      diff *
+        amount
+    );
+  }
 
   function updatePlayers() {
+    for (
+      const p of
+      Object.values(players)
+    ) {
+      /*
+       * No camera.
+       *
+       * Only the player position is smoothly
+       * interpolated toward the server position.
+       */
 
-    Object.values(
-      players
-    ).forEach(
-      player => {
+      p.x +=
+        (
+          p.targetX -
+          p.x
+        ) * 0.30;
 
-        /*
-          Local player position is
-          server-authoritative.
+      p.y +=
+        (
+          p.targetY -
+          p.y
+        ) * 0.30;
 
-          Smooth only the camera.
-        */
-
-        if (
-          player.id !== myId
-        ) {
-
-          player.x =
-            lerp(
-              player.x,
-              player.targetX,
-              .24
-            );
-
-
-          player.y =
-            lerp(
-              player.y,
-              player.targetY,
-              .24
-            );
-
-
-          player.angle =
-            lerpAngle(
-              player.angle,
-              player.targetAngle,
-              .24
-            );
-
-        } else {
-
-          /*
-            Small interpolation for
-            local rendering.
-          */
-
-          player.x =
-            lerp(
-              player.x,
-              player.targetX,
-              .18
-            );
-
-
-          player.y =
-            lerp(
-              player.y,
-              player.targetY,
-              .18
-            );
-
-
-          player.angle =
-            lerpAngle(
-              player.angle,
-              player.targetAngle,
-              .18
-            );
-        }
-      }
-    );
+      p.angle =
+        lerpAngle(
+          p.angle,
+          p.targetAngle,
+          0.25
+        );
+    }
   }
 
+  /*
+   * ============================================
+   * DRAW MAP
+   * ============================================
+   */
 
-  /* =========================================================
-     DRAW BACKGROUND
-  ========================================================= */
+  function drawMap() {
+    const v =
+      worldViewport();
 
-  function drawBackground() {
-
-    ctx.fillStyle =
-      "#080a0f";
-
-    ctx.fillRect(
-      0,
-      0,
-      W,
-      H
-    );
-
+    ctx.save();
 
     /*
-      Grid.
-    */
+     * Everything is clipped to the page viewport.
+     */
 
-    const grid =
-      100;
+    ctx.beginPath();
 
+    ctx.rect(
+      v.x,
+      v.y,
+      v.w,
+      v.h
+    );
 
-    const startX =
-      -(
-        (
-          cameraX -
-          W / 2
-        ) %
-        grid
-      );
+    ctx.clip();
 
-
-    const startY =
-      -(
-        (
-          cameraY -
-          H / 2
-        ) %
-        grid
-      );
-
+    /*
+     * Subtle grid.
+     *
+     * This does NOT create an opaque background.
+     * The Riot page remains visible.
+     */
 
     ctx.strokeStyle =
-      "rgba(255,255,255,.035)";
+      "rgba(255,255,255,.045)";
 
     ctx.lineWidth =
       1;
 
+    const grid =
+      250;
 
     for (
-      let x = startX;
-      x < W;
+      let x = 0;
+      x <= WORLD_WIDTH;
       x += grid
     ) {
+      const sx =
+        v.x +
+        x *
+          v.scale;
 
       ctx.beginPath();
 
       ctx.moveTo(
-        Math.round(x) + .5,
-        0
+        sx,
+        v.y
       );
 
       ctx.lineTo(
-        Math.round(x) + .5,
-        H
+        sx,
+        v.y +
+          v.h
       );
 
       ctx.stroke();
     }
 
-
     for (
-      let y = startY;
-      y < H;
+      let y = 0;
+      y <= WORLD_HEIGHT;
       y += grid
     ) {
+      const sy =
+        v.y +
+        y *
+          v.scale;
 
       ctx.beginPath();
 
       ctx.moveTo(
-        0,
-        Math.round(y) + .5
+        v.x,
+        sy
       );
 
       ctx.lineTo(
-        W,
-        Math.round(y) + .5
+        v.x +
+          v.w,
+        sy
       );
 
       ctx.stroke();
     }
 
-
     /*
-      World border.
-    */
-
-    const topLeft =
-      worldToScreen(
-        0,
-        0
-      );
-
-
-    ctx.strokeStyle =
-      "rgba(255,73,101,.25)";
-
-    ctx.lineWidth =
-      2;
-
-    ctx.strokeRect(
-      topLeft.x,
-      topLeft.y,
-      WORLD_WIDTH,
-      WORLD_HEIGHT
-    );
-  }
-
-
-  /* =========================================================
-     DRAW OBSTACLES
-  ========================================================= */
-
-  function drawObstacles() {
+     * Server-generated obstacles.
+     */
 
     for (
-      const obstacle
-      of currentMap
+      const ob of
+      worldMap
     ) {
-
-      if (!obstacle) {
+      if (!ob) {
         continue;
       }
 
+      const sx =
+        v.x +
+        Number(
+          ob.x || 0
+        ) *
+          v.scale;
 
-      const p =
-        worldToScreen(
-          Number(obstacle.x) || 0,
-          Number(obstacle.y) || 0
+      const sy =
+        v.y +
+        Number(
+          ob.y || 0
+        ) *
+          v.scale;
+
+      const sw =
+        Math.max(
+          4,
+          Number(
+            ob.w || 100
+          ) *
+            v.scale
         );
 
-
-      const w =
-        Number(obstacle.w) || 0;
-
-      const h =
-        Number(obstacle.h) || 0;
-
-
-      /*
-        Skip objects completely
-        outside the viewport.
-      */
-
-      if (
-        p.x + w < 0 ||
-        p.x > W ||
-        p.y + h < 0 ||
-        p.y > H
-      ) {
-
-        continue;
-      }
-
-
-      /*
-        Block.
-      */
+      const sh =
+        Math.max(
+          4,
+          Number(
+            ob.h || 80
+          ) *
+            v.scale
+        );
 
       ctx.fillStyle =
-        "rgba(25,29,39,.96)";
-
-      ctx.fillRect(
-        p.x,
-        p.y,
-        w,
-        h
-      );
-
+        "rgba(30,33,43,.34)";
 
       ctx.strokeStyle =
-        "rgba(255,255,255,.13)";
+        "rgba(232,200,120,.22)";
 
       ctx.lineWidth =
         1;
 
-      ctx.strokeRect(
-        p.x + .5,
-        p.y + .5,
-        w - 1,
-        h - 1
+      ctx.fillRect(
+        sx,
+        sy,
+        sw,
+        sh
       );
 
-
-      /*
-        AUX text inside obstacle.
-      */
-
-      ctx.save();
-
-      ctx.globalAlpha =
-        .24;
+      ctx.strokeRect(
+        sx,
+        sy,
+        sw,
+        sh
+      );
 
       ctx.fillStyle =
-        "#ffd45a";
+        "rgba(232,200,120,.40)";
 
       ctx.font =
-        "900 12px Arial";
+        `${Math.max(
+          6,
+          Math.min(
+            10,
+            sw / 13
+          )
+        )}px Arial`;
 
       ctx.textAlign =
         "center";
@@ -2246,175 +2056,68 @@
       ctx.textBaseline =
         "middle";
 
-
-      const label =
-        obstacle.label ||
-        "AUX";
-
-
       ctx.fillText(
-        label,
-        p.x + w / 2,
-        p.y + h / 2
+        ob.label ||
+          "AUX",
+
+        sx +
+          sw / 2,
+
+        sy +
+          sh / 2
       );
-
-
-      ctx.restore();
     }
-  }
 
+    /*
+     * Visible map boundary.
+     */
 
-  /* =========================================================
-     DRAW RPG MISSILES
-  ========================================================= */
+    ctx.strokeStyle =
+      "rgba(255,255,255,.10)";
 
-  function drawProjectiles() {
+    ctx.lineWidth =
+      1;
 
-    projectiles.forEach(
-      projectile => {
-
-        if (
-          projectile.type !==
-          "rpg"
-        ) {
-
-          return;
-        }
-
-
-        const p =
-          worldToScreen(
-            Number(projectile.x) || 0,
-            Number(projectile.y) || 0
-          );
-
-
-        ctx.save();
-
-        ctx.translate(
-          p.x,
-          p.y
-        );
-
-
-        ctx.rotate(
-          Number(projectile.angle) || 0
-        );
-
-
-        /*
-          Smoke/trail.
-        */
-
-        ctx.fillStyle =
-          "rgba(255,150,80,.22)";
-
-        ctx.beginPath();
-
-        ctx.arc(
-          -9,
-          0,
-          6,
-          0,
-          Math.PI * 2
-        );
-
-        ctx.fill();
-
-
-        /*
-          Missile body.
-        */
-
-        ctx.fillStyle =
-          "#d6d6d6";
-
-        ctx.fillRect(
-          -5,
-          -2,
-          16,
-          4
-        );
-
-
-        ctx.fillStyle =
-          "#f39b70";
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-          13,
-          0
-        );
-
-        ctx.lineTo(
-          5,
-          -4
-        );
-
-        ctx.lineTo(
-          5,
-          4
-        );
-
-        ctx.closePath();
-
-        ctx.fill();
-
-
-        ctx.restore();
-      }
+    ctx.strokeRect(
+      v.x,
+      v.y,
+      v.w,
+      v.h
     );
+
+    ctx.restore();
   }
 
+  /*
+   * ============================================
+   * PROJECTILES
+   * ============================================
+   */
 
-  /* =========================================================
-     DRAW PLAYER
-  ========================================================= */
-
-  function drawPlayer(
-    player,
-    index
+  function drawProjectile(
+    projectile
   ) {
-
-    if (!player) {
-      return;
-    }
-
+    const v =
+      worldViewport();
 
     const p =
       worldToScreen(
-        Number(player.x) || 0,
-        Number(player.y) || 0
+        Number(
+          projectile.x || 0
+        ),
+        Number(
+          projectile.y || 0
+        )
       );
 
-
-    /*
-      Don't draw far outside
-      viewport.
-    */
-
-    if (
-      p.x < -100 ||
-      p.x > W + 100 ||
-      p.y < -100 ||
-      p.y > H + 100
-    ) {
-
-      return;
-    }
-
-
-    const cls =
-      CLASSES[
-        player.class
-      ] ||
-      CLASSES.assaulter;
-
-
-    const color =
-      cls.color;
-
+    const size =
+      Math.max(
+        2.5,
+        7 *
+          v.scale *
+          2 +
+          2
+      );
 
     ctx.save();
 
@@ -2424,24 +2127,141 @@
     );
 
     ctx.rotate(
-      Number(player.angle) || 0
+      Number(
+        projectile.angle ||
+        0
+      )
     );
 
+    if (
+      projectile.type ===
+      "rpg"
+    ) {
+      ctx.fillStyle =
+        "#e8c878";
+
+      ctx.fillRect(
+        -size * 1.8,
+        -size * .45,
+        size * 3.6,
+        size * .9
+      );
+
+      ctx.fillStyle =
+        "#fff1b0";
+
+      ctx.fillRect(
+        size * 1.2,
+        -size * .35,
+        size * .8,
+        size * .7
+      );
+    } else {
+      ctx.fillStyle =
+        "#fff";
+
+      ctx.beginPath();
+
+      ctx.arc(
+        0,
+        0,
+        size,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  /*
+   * ============================================
+   * PLAYER DRAWING
+   * ============================================
+   */
+
+  function drawPlayer(
+    p,
+    index
+  ) {
+    if (!p) {
+      return;
+    }
+
+    const pos =
+      worldToScreen(
+        p.x,
+        p.y
+      );
 
     /*
-      Shadow.
-    */
+     * Keep players readable even when
+     * the complete 5000x5000 world is fitted
+     * inside a smaller browser.
+     */
+
+    const radius =
+      Math.max(
+        6,
+        Math.min(
+          13,
+          16 *
+            worldViewport()
+              .scale *
+            2.2
+        )
+      );
+
+    const colors = [
+      "#42b982",
+      "#e3485c",
+      "#82b1ff",
+      "#e8c878",
+      "#f39b70",
+      "#b58cff",
+      "#5bd7d0",
+      "#ff8ca1",
+      "#d2e66e",
+      "#ff9b52"
+    ];
+
+    const bodyColor =
+      p.id === myId
+        ? "#42b982"
+        : (
+            colors[
+              index %
+                colors.length
+            ]
+          );
+
+    ctx.save();
+
+    ctx.translate(
+      pos.x,
+      pos.y
+    );
+
+    ctx.rotate(
+      p.angle || 0
+    );
+
+    /*
+     * Shadow.
+     */
 
     ctx.fillStyle =
-      "rgba(0,0,0,.42)";
+      "rgba(0,0,0,.24)";
 
     ctx.beginPath();
 
     ctx.ellipse(
       0,
-      13,
-      16,
-      7,
+      radius * .85,
+      radius * .9,
+      radius * .42,
       0,
       0,
       Math.PI * 2
@@ -2449,298 +2269,184 @@
 
     ctx.fill();
 
-
     /*
-      Dead player.
-    */
-
-    if (
-      player.alive === false
-    ) {
-
-      ctx.globalAlpha =
-        .28;
-    }
-
-
-    /*
-      Body.
-    */
+     * Body.
+     */
 
     ctx.fillStyle =
-      color;
-
-    ctx.beginPath();
-
-    ctx.roundRect(
-      -11,
-      -13,
-      22,
-      26,
-      4
-    );
-
-    ctx.fill();
-
-
-    /*
-      Head.
-    */
-
-    ctx.fillStyle =
-      "#d7b29a";
-
-    ctx.beginPath();
-
-    ctx.arc(
-      7,
-      0,
-      6,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-
-    /*
-      Weapon.
-    */
-
-    ctx.fillStyle =
-      "#252932";
-
-    const weaponLength =
-      player.class === "sniper"
-        ? 34
-        : player.class === "rpg"
-          ? 30
-          : 25;
-
+      bodyColor;
 
     ctx.fillRect(
-      7,
-      -2,
-      weaponLength,
-      4
+      -radius * .62,
+      -radius,
+      radius * 1.24,
+      radius * 2
     );
 
+    /*
+     * Weapon.
+     */
+
+    ctx.fillStyle =
+      "#17191f";
+
+    ctx.fillRect(
+      radius * .25,
+      -radius * .16,
+      radius * 1.7,
+      Math.max(
+        2,
+        radius * .28
+      )
+    );
 
     /*
-      RPG launcher shape.
-    */
+     * Class indicator.
+     */
 
-    if (
-      player.class ===
-      "rpg"
-    ) {
+    ctx.fillStyle =
+      "rgba(255,255,255,.75)";
 
-      ctx.fillStyle =
-        "#343943";
-
-      ctx.fillRect(
-        4,
-        -5,
-        24,
-        10
-      );
-    }
-
+    ctx.fillRect(
+      -radius * .15,
+      -radius * .62,
+      radius * .3,
+      radius * .3
+    );
 
     /*
-      Shotgun double barrel.
-    */
+     * Dead player.
+     */
 
-    if (
-      player.class ===
-      "shotgun"
-    ) {
+    if (!p.alive) {
+      ctx.globalAlpha =
+        .32;
 
       ctx.fillStyle =
-        "#22252b";
+        "#000";
 
       ctx.fillRect(
-        6,
-        -5,
-        24,
-        2
-      );
-
-      ctx.fillRect(
-        6,
-        3,
-        24,
-        2
+        -radius * .8,
+        -radius * 1.15,
+        radius * 1.6,
+        radius * 2.3
       );
     }
-
 
     ctx.restore();
 
-
     /*
-      Health bar.
-    */
+     * HP bar.
+     */
 
     const hp =
-      clamp(
-        (
-          Number(player.hp) || 0
-        ) /
-        (
-          Number(player.maxHp) ||
-          100
-        ),
+      Math.max(
         0,
-        1
+        Math.min(
+          1,
+          Number(
+            p.hp || 0
+          ) /
+          Math.max(
+            1,
+            Number(
+              p.maxHp ||
+              100
+            )
+          )
+        )
       );
 
+    const barW =
+      Math.max(
+        24,
+        radius * 3
+      );
+
+    const barH =
+      3;
 
     ctx.fillStyle =
-      "rgba(0,0,0,.75)";
+      "rgba(0,0,0,.65)";
 
     ctx.fillRect(
-      p.x - 22,
-      p.y - 30,
-      44,
-      4
-    );
+      pos.x -
+        barW / 2,
 
+      pos.y -
+        radius -
+        10,
+
+      barW,
+      barH
+    );
 
     ctx.fillStyle =
-      color;
+      bodyColor;
 
     ctx.fillRect(
-      p.x - 22,
-      p.y - 30,
-      44 * hp,
-      4
-    );
+      pos.x -
+        barW / 2,
 
+      pos.y -
+        radius -
+        10,
+
+      barW * hp,
+      barH
+    );
 
     /*
-      Name.
-    */
+     * Name.
+     */
 
     ctx.font =
-      "900 9px Arial";
+      "8px Arial";
 
     ctx.textAlign =
       "center";
 
-    ctx.fillStyle =
-      player.id === myId
-        ? "#65e0a2"
-        : "rgba(255,255,255,.82)";
+    ctx.textBaseline =
+      "top";
 
+    ctx.fillStyle =
+      p.id === myId
+        ? "rgba(66,185,130,.95)"
+        : "rgba(255,255,255,.72)";
 
     ctx.fillText(
-      player.id === myId
+      p.id === myId
         ? "YOU"
         : (
-            player.name ||
+            p.name ||
             "PLAYER"
           ),
-      p.x,
-      p.y + 27
+
+      pos.x,
+
+      pos.y +
+        radius +
+        5
     );
-
-
-    /*
-      Class marker.
-    */
-
-    ctx.font =
-      "7px Arial";
-
-    ctx.fillStyle =
-      "rgba(255,255,255,.42)";
-
-
-    ctx.fillText(
-      (
-        player.class ||
-        "assaulter"
-      ).toUpperCase(),
-      p.x,
-      p.y + 38
-    );
-
-
-    /*
-      Local player aim line.
-    */
-
-    if (
-      player.id === myId &&
-      player.alive !== false
-    ) {
-
-      ctx.save();
-
-      ctx.strokeStyle =
-        "rgba(255,255,255,.08)";
-
-      ctx.lineWidth =
-        1;
-
-      ctx.beginPath();
-
-      ctx.moveTo(
-        p.x,
-        p.y
-      );
-
-      ctx.lineTo(
-        p.x +
-          Math.cos(player.angle) *
-          65,
-
-        p.y +
-          Math.sin(player.angle) *
-          65
-      );
-
-      ctx.stroke();
-
-      ctx.restore();
-    }
-
-
-    /*
-      Reload indicator.
-    */
-
-    if (
-      player.id === myId &&
-      player.reloading
-    ) {
-
-      ctx.font =
-        "900 8px Arial";
-
-      ctx.fillStyle =
-        "#ffd45a";
-
-      ctx.fillText(
-        "RELOADING...",
-        p.x,
-        p.y - 39
-      );
-    }
   }
 
-
-  /* =========================================================
-     DRAW GAME
-  ========================================================= */
+  /*
+   * ============================================
+   * RENDER LOOP
+   * ============================================
+   */
 
   function draw() {
-
     if (destroyed) {
       return;
     }
 
+    /*
+     * Transparent clear.
+     *
+     * This is the key part that lets the Riot page
+     * remain visible underneath the game.
+     */
 
     ctx.clearRect(
       0,
@@ -2749,44 +2455,26 @@
       H
     );
 
+    if (connected) {
+      updatePlayers();
 
-    updatePlayers();
+      drawMap();
 
-    updateCamera();
-
-    drawBackground();
-
-    drawObstacles();
-
-    drawProjectiles();
-
-
-    const list =
-      Object.values(
-        players
-      );
-
-
-    list.forEach(
-      (player, index) => {
-
-        drawPlayer(
-          player,
-          index
+      for (
+        const projectile of
+        worldProjectiles
+      ) {
+        drawProjectile(
+          projectile
         );
       }
-    );
 
-
-    /*
-      Crosshair.
-    */
-
-    if (connected) {
-
-      drawCrosshair();
+      Object.values(
+        players
+      ).forEach(
+        drawPlayer
+      );
     }
-
 
     animationId =
       requestAnimationFrame(
@@ -2794,369 +2482,25 @@
       );
   }
 
+  /*
+   * ============================================
+   * ROOM KEY
+   * ============================================
+   */
 
-  /* =========================================================
-     CROSSHAIR
-  ========================================================= */
-
-  function drawCrosshair() {
-
-    const size =
-      7;
-
-
-    ctx.save();
-
-    ctx.strokeStyle =
-      "rgba(255,255,255,.7)";
-
-    ctx.lineWidth =
-      1;
-
-
-    ctx.beginPath();
-
-    ctx.moveTo(
-      mouseX - size,
-      mouseY
-    );
-
-    ctx.lineTo(
-      mouseX - 2,
-      mouseY
-    );
-
-
-    ctx.moveTo(
-      mouseX + 2,
-      mouseY
-    );
-
-    ctx.lineTo(
-      mouseX + size,
-      mouseY
-    );
-
-
-    ctx.moveTo(
-      mouseX,
-      mouseY - size
-    );
-
-    ctx.lineTo(
-      mouseX,
-      mouseY - 2
-    );
-
-
-    ctx.moveTo(
-      mouseX,
-      mouseY + 2
-    );
-
-    ctx.lineTo(
-      mouseX,
-      mouseY + size
-    );
-
-
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-
-  /* =========================================================
-     KILL FEED
-  ========================================================= */
-
-  function addFeed(text) {
-
-    const item =
-      document.createElement(
-        "div"
-      );
-
-
-    item.className =
-      "riot-feed";
-
-
-    item.textContent =
-      text;
-
-
-    killFeed.appendChild(
-      item
-    );
-
-
-    window.setTimeout(
-      () => item.remove(),
-      2600
-    );
-
-
+  function onRoomKeyInput() {
     /*
-      Prevent the feed from growing.
-    */
-
-    while (
-      killFeed.children.length >
-      5
-    ) {
-
-      killFeed.firstChild.remove();
-    }
-  }
-
-
-  /* =========================================================
-     LEAVE
-  ========================================================= */
-
-  function leave() {
-
-    mouseDown =
-      false;
-
-    pulseShot =
-      false;
-
-    connected =
-      false;
-
-    myId =
-      null;
-
-    currentRoom =
-      null;
-
-    closeSocket();
-
-    clearPlayers();
-
-
-    roomBox.style.display =
-      "none";
-
-    playerList.style.display =
-      "none";
-
-    classPanel.style.display =
-      "none";
-
-    upgradePanel.style.display =
-      "none";
-
-
-    help.style.display =
-      "block";
-
-
-    setStatus(
-      "OFFLINE"
-    );
-  }
-
-
-  /* =========================================================
-     KEYBOARD
-  ========================================================= */
-
-  function onKeyDown(event) {
-
-    /*
-      Don't steal letters/numbers
-      while typing the room key.
-    */
-
-    if (
-      event.target ===
-        keyInput ||
-      event.target ===
-        serverInput
-    ) {
-
-      return;
-    }
-
-
-    const key =
-      event.key.toLowerCase();
-
-
-    if (
-      [
-        "w",
-        "a",
-        "s",
-        "d"
-      ].includes(key)
-    ) {
-
-      keys[key] =
-        true;
-
-      event.preventDefault();
-    }
-  }
-
-
-  function onKeyUp(event) {
-
-    if (
-      event.target ===
-        keyInput ||
-      event.target ===
-        serverInput
-    ) {
-
-      return;
-    }
-
-
-    const key =
-      event.key.toLowerCase();
-
-
-    if (
-      [
-        "w",
-        "a",
-        "s",
-        "d"
-      ].includes(key)
-    ) {
-
-      keys[key] =
-        false;
-
-      event.preventDefault();
-    }
-  }
-
-
-  /* =========================================================
-     MOUSE
-  ========================================================= */
-
-  function onMouseMove(event) {
-
-    mouseX =
-      event.clientX;
-
-    mouseY =
-      event.clientY;
-  }
-
-
-  function onMouseDown(event) {
-
-    /*
-      Never let the game background
-      steal a click from UI controls.
-    */
-
-    if (
-      event.target.closest(
-        "#riot-soldier-controls"
-      ) ||
-
-      event.target.closest(
-        "#riot-soldier-upgrades"
-      ) ||
-
-      event.target.closest(
-        "#riot-soldier-class-panel"
-      ) ||
-
-      event.target.closest(
-        "input"
-      ) ||
-
-      event.target.closest(
-        "button"
-      )
-    ) {
-
-      return;
-    }
-
-
-    if (
-      event.button !== 0
-    ) {
-
-      return;
-    }
-
-
-    if (!connected) {
-      return;
-    }
-
-
-    mouseDown =
-      true;
-
-
-    const me =
-      players[myId];
-
-
-    if (!me) {
-      return;
-    }
-
-
-    /*
-      Only Assaulter uses continuous
-      fire.
-
-      The other classes use a pulse,
-      giving one click = one shot.
-    */
-
-    if (
-      me.class !==
-      "assaulter"
-    ) {
-
-      pulseShot =
-        true;
-    }
-  }
-
-
-  function onMouseUp(event) {
-
-    if (
-      event.button === 0
-    ) {
-
-      mouseDown =
-        false;
-
-      pulseShot =
-        false;
-    }
-  }
-
-
-  /* =========================================================
-     ROOM KEY INPUT
-  ========================================================= */
-
-  function onKeyInput() {
-
-    /*
-      IMPORTANT:
-      Letters AND numbers are allowed.
-    */
-
-    keyInput.value =
-      keyInput.value
+     * IMPORTANT:
+     *
+     * Don't use keydown restrictions here.
+     * That was the reason letters/numbers could
+     * previously fail to type.
+     *
+     * We sanitize the complete value instead.
+     */
+
+    roomKeyInput.value =
+      roomKeyInput.value
         .toUpperCase()
         .replace(
           /[^A-Z0-9-]/g,
@@ -3168,39 +2512,201 @@
         );
   }
 
+  function onRoomKeyKeyDown(
+    event
+  ) {
+    if (
+      event.key ===
+      "Enter"
+    ) {
+      event.preventDefault();
 
-  /* =========================================================
-     PREVENT BACKGROUND CLICK
-  ========================================================= */
+      joinRoom();
+    }
+  }
 
-  function onContextMenu(event) {
+  /*
+   * ============================================
+   * KEYBOARD
+   * ============================================
+   */
+
+  function onKeyDown(
+    event
+  ) {
+    if (!connected) {
+      return;
+    }
+
+    const target =
+      event.target;
+
+    const typing =
+      target instanceof
+        HTMLInputElement ||
+      target instanceof
+        HTMLTextAreaElement ||
+      target?.isContentEditable;
+
+    if (typing) {
+      return;
+    }
+
+    const key =
+      event.key.toLowerCase();
 
     if (
-      event.target ===
-      canvas
+      [
+        "w",
+        "a",
+        "s",
+        "d"
+      ].includes(key)
     ) {
+      keys[key] =
+        true;
 
       event.preventDefault();
     }
   }
 
+  function onKeyUp(
+    event
+  ) {
+    const key =
+      event.key.toLowerCase();
 
-  /* =========================================================
-     CLASS BUTTONS
-  ========================================================= */
+    if (
+      [
+        "w",
+        "a",
+        "s",
+        "d"
+      ].includes(key)
+    ) {
+      keys[key] =
+        false;
+
+      if (connected) {
+        event.preventDefault();
+      }
+    }
+  }
+
+  /*
+   * ============================================
+   * MOUSE
+   * ============================================
+   */
+
+  function onMouseMove(
+    event
+  ) {
+    mouseX =
+      event.clientX;
+
+    mouseY =
+      event.clientY;
+  }
+
+  function onMouseDown(
+    event
+  ) {
+    if (!connected) {
+      return;
+    }
+
+    /*
+     * HUD/class/room buttons should not shoot.
+     */
+
+    if (
+      event.target.closest(
+        "#rs-hud"
+      ) ||
+      event.target.closest(
+        "#rs-class"
+      ) ||
+      event.target.closest(
+        "#rs-controls"
+      )
+    ) {
+      return;
+    }
+
+    if (
+      event.button === 0
+    ) {
+      mouseDown =
+        true;
+
+      event.preventDefault();
+    }
+  }
+
+  function onMouseUp(
+    event
+  ) {
+    if (
+      event.button === 0
+    ) {
+      mouseDown =
+        false;
+    }
+  }
+
+  /*
+   * ============================================
+   * WINDOW BLUR
+   * ============================================
+   */
+
+  function onBlur() {
+    mouseDown =
+      false;
+
+    keys.w = false;
+    keys.a = false;
+    keys.s = false;
+    keys.d = false;
+  }
+
+  /*
+   * ============================================
+   * EVENT LISTENERS
+   * ============================================
+   */
+
+  joinButton.addEventListener(
+    "click",
+    joinRoom
+  );
+
+  leaveButton.addEventListener(
+    "click",
+    leaveRoom
+  );
+
+  roomKeyInput.addEventListener(
+    "input",
+    onRoomKeyInput
+  );
+
+  roomKeyInput.addEventListener(
+    "keydown",
+    onRoomKeyKeyDown
+  );
 
   root
     .querySelectorAll(
-      ".riot-class-button"
+      ".rs-class-button"
     )
     .forEach(
       button => {
-
         button.addEventListener(
           "click",
           event => {
-
-            event.stopPropagation();
+            event.preventDefault();
 
             chooseClass(
               button.dataset.class
@@ -3210,23 +2716,16 @@
       }
     );
 
-
-  /* =========================================================
-     UPGRADE BUTTONS
-  ========================================================= */
-
   root
     .querySelectorAll(
-      ".riot-upgrade"
+      ".rs-upgrade"
     )
     .forEach(
       button => {
-
         button.addEventListener(
           "click",
           event => {
-
-            event.stopPropagation();
+            event.preventDefault();
 
             buyUpgrade(
               button.dataset.upgrade
@@ -3236,69 +2735,19 @@
       }
     );
 
-
-  /* =========================================================
-     ROOM BUTTONS
-  ========================================================= */
-
-  joinButton.addEventListener(
-    "click",
-    event => {
-
-      event.stopPropagation();
-
-      connect();
-    }
-  );
-
-
-  leaveButton.addEventListener(
-    "click",
-    event => {
-
-      event.stopPropagation();
-
-      leave();
-    }
-  );
-
-
-  keyInput.addEventListener(
-    "input",
-    onKeyInput
-  );
-
-
-  /*
-    Enter in room key joins.
-  */
-
-  keyInput.addEventListener(
-    "keydown",
-    event => {
-
-      if (
-        event.key ===
-        "Enter"
-      ) {
-
-        event.preventDefault();
-
-        connect();
-      }
-    }
-  );
-
-
-  /* =========================================================
-     WINDOW EVENTS
-  ========================================================= */
-
   window.addEventListener(
     "resize",
     resize
   );
 
+  window.addEventListener(
+    "blur",
+    onBlur
+  );
+
+  /*
+   * Capture keyboard globally only while joined.
+   */
 
   document.addEventListener(
     "keydown",
@@ -3306,81 +2755,92 @@
     true
   );
 
-
   document.addEventListener(
     "keyup",
     onKeyUp,
     true
   );
 
-
   document.addEventListener(
     "mousemove",
     onMouseMove
   );
 
-
   document.addEventListener(
     "mousedown",
-    onMouseDown
+    onMouseDown,
+    true
   );
-
 
   document.addEventListener(
     "mouseup",
-    onMouseUp
+    onMouseUp,
+    true
   );
 
+  /*
+   * ============================================
+   * INITIAL STATE
+   * ============================================
+   */
 
-  document.addEventListener(
-    "contextmenu",
-    onContextMenu
+  resize();
+
+  setGameActive(
+    false
   );
 
-
-  /* =========================================================
-     INPUT LOOP
-  ========================================================= */
+  /*
+   * Send movement/shooting input
+   * approximately 20 times per second.
+   */
 
   inputTimer =
     window.setInterval(
       () => {
-
         if (connected) {
-
           sendInput();
         }
       },
       50
     );
 
-
-  /* =========================================================
-     CLEANUP
-  ========================================================= */
+  /*
+   * ============================================
+   * CLEANUP
+   * ============================================
+   */
 
   window.__riotSoldierCleanup =
     () => {
-
       destroyed =
         true;
-
 
       cancelAnimationFrame(
         animationId
       );
 
-
       clearInterval(
         inputTimer
       );
 
+      clearTimeout(
+        auxPopupTimer
+      );
+
+      clearTimeout(
+        killNoteTimer
+      );
 
       window.removeEventListener(
         "resize",
         resize
       );
 
+      window.removeEventListener(
+        "blur",
+        onBlur
+      );
 
       document.removeEventListener(
         "keydown",
@@ -3388,37 +2848,28 @@
         true
       );
 
-
       document.removeEventListener(
         "keyup",
         onKeyUp,
         true
       );
 
-
       document.removeEventListener(
         "mousemove",
         onMouseMove
       );
 
-
       document.removeEventListener(
         "mousedown",
-        onMouseDown
+        onMouseDown,
+        true
       );
-
 
       document.removeEventListener(
         "mouseup",
-        onMouseUp
+        onMouseUp,
+        true
       );
-
-
-      document.removeEventListener(
-        "contextmenu",
-        onContextMenu
-      );
-
 
       closeSocket();
 
@@ -3427,28 +2878,21 @@
       delete window.__riotSoldierCleanup;
     };
 
-
-  /* =========================================================
-     START
-  ========================================================= */
-
-  resize();
-
-  updatePlayerList();
-
-  setStatus(
-    "OFFLINE"
-  );
-
+  /*
+   * ============================================
+   * START
+   * ============================================
+   */
 
   console.log(
-    "%cRIOT SOLDIER",
-    "color:#ff4965;font-weight:900;font-size:18px"
+    "%cRIOT SOLDIER%c overlay client ready",
+    "color:#e3485c;font-weight:900",
+    "color:inherit;font-weight:700"
   );
 
   console.log(
-    "Client loaded. Server:",
-    serverInput.value
+    "Server:",
+    SERVER_URL
   );
 
   draw();
