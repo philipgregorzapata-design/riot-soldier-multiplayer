@@ -1,6 +1,6 @@
 {
-  "name": "riot-soldier-multiplayer",
-  "main": "src/worker.js",
+  "name": "riot-game-server",
+  "main": "worker.js",
   "compatibility_date": "2026-08-31",
 
   "durable_objects": {
@@ -12,10 +12,12 @@
     ]
   },
 
-  "exports": {
-    "RiotRoom": {
-      "type": "durable-object",
-      "storage": "sqlite"
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RiotRoom"
+      ]
     }
-  }
+  ]
 }
