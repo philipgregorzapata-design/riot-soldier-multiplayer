@@ -495,6 +495,7 @@
   let killNoteTimer = 0;
   let animationId = 0;
   let inputTimer = 0;
+  let assaultTimer = 0;
   let destroyed = false;
 
   const palette = [
